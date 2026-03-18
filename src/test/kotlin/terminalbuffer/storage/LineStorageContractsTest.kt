@@ -9,7 +9,7 @@ import kotlin.test.assertFailsWith
 class LineStorageContractsTest {
     @Test
     fun `indexed methods throw on invalid bounds`() {
-        val storage = TestMutableLineStorage()
+        val storage = InMemoryLineStorage()
 
         assertFailsWith<IndexOutOfBoundsException> { storage.lineSnapshot(0) }
         assertFailsWith<IndexOutOfBoundsException> { storage.mutableLine(0) }
@@ -21,7 +21,7 @@ class LineStorageContractsTest {
 
     @Test
     fun `line snapshot is detached from storage`() {
-        val storage = TestMutableLineStorage()
+        val storage = InMemoryLineStorage()
         storage.appendLine(lineOf("ab"))
 
         val snapshot = storage.lineSnapshot(0).toMutableList()
@@ -32,7 +32,7 @@ class LineStorageContractsTest {
 
     @Test
     fun `append insert and replace defensively copy inputs`() {
-        val storage = TestMutableLineStorage()
+        val storage = InMemoryLineStorage()
 
         val appendSource = lineOf("ab")
         storage.appendLine(appendSource)
@@ -52,7 +52,7 @@ class LineStorageContractsTest {
 
     @Test
     fun `mutable line returns live stored line`() {
-        val storage = TestMutableLineStorage()
+        val storage = InMemoryLineStorage()
         storage.appendLine(lineOf("ab"))
 
         val liveLine = storage.mutableLine(0)
@@ -63,7 +63,7 @@ class LineStorageContractsTest {
 
     @Test
     fun `structural operations keep line count consistent`() {
-        val storage = TestMutableLineStorage()
+        val storage = InMemoryLineStorage()
         assertEquals(0, storage.lineCount)
 
         storage.appendLine(lineOf("a"))
@@ -91,6 +91,18 @@ class LineStorageContractsTest {
         assertEquals(0, storage.lineCount)
     }
 
+    @Test
+    fun `insert line at lineCount appends using array deque backing`() {
+        val storage = InMemoryLineStorage()
+        storage.appendLine(lineOf("a"))
+
+        storage.insertLine(storage.lineCount, lineOf("b"))
+
+        assertEquals(2, storage.lineCount)
+        assertEquals("a", storage.lineSnapshot(0).toText())
+        assertEquals("b", storage.lineSnapshot(1).toText())
+    }
+
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })
 
     private fun List<TerminalCell>.toText(): String =
@@ -100,69 +112,4 @@ class LineStorageContractsTest {
                 append(String(Character.toChars(codePoint)))
             }
         }
-
-    /**
-     * Minimal mutable storage test double that follows the storage contract semantics.
-     */
-    private class TestMutableLineStorage : MutableLineStorage {
-        private val lines = mutableListOf<BufferLine>()
-
-        override val lineCount: Int
-            get() = lines.size
-
-        override fun lineSnapshot(index: Int): List<TerminalCell> {
-            validateExistingIndex(index)
-            return lines[index].snapshot()
-        }
-
-        override fun appendLine(line: BufferLine) {
-            lines.add(copyOf(line))
-        }
-
-        override fun insertLine(
-            index: Int,
-            line: BufferLine,
-        ) {
-            validateInsertionIndex(index)
-            lines.add(index, copyOf(line))
-        }
-
-        override fun replaceLine(
-            index: Int,
-            line: BufferLine,
-        ) {
-            validateExistingIndex(index)
-            lines[index] = copyOf(line)
-        }
-
-        override fun mutableLine(index: Int): BufferLine {
-            validateExistingIndex(index)
-            return lines[index]
-        }
-
-        override fun removeFirstLine(): BufferLine {
-            if (lines.isEmpty()) {
-                throw IndexOutOfBoundsException("Cannot remove first line from empty storage")
-            }
-            return lines.removeAt(0)
-        }
-
-        override fun clear() {
-            lines.clear()
-        }
-
-        private fun validateExistingIndex(index: Int) {
-            if (index !in 0 until lineCount) {
-                throw IndexOutOfBoundsException("Index $index is outside valid range 0..${lineCount - 1}")
-            }
-        }
-
-        private fun validateInsertionIndex(index: Int) {
-            if (index !in 0..lineCount) {
-                throw IndexOutOfBoundsException("Insertion index $index is outside valid range 0..$lineCount")
-            }
-        }
-
-        private fun copyOf(source: BufferLine): BufferLine = BufferLine.fromCells(source.snapshot())
-    }
 }
