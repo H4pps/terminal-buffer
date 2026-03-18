@@ -1,5 +1,6 @@
 package terminalbuffer.manager
 
+import terminalbuffer.contracts.BufferRegion
 import terminalbuffer.domain.BufferLine
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
@@ -9,6 +10,7 @@ import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -49,7 +51,7 @@ class BufferDataManagerTest {
     }
 
     @Test
-    fun `constructor bootstraps storage with exactly screen height empty lines`() {
+    fun `constructor bootstraps storage with one canonical empty line`() {
         val storage = InMemoryLineStorage()
 
         BufferDataManager(
@@ -59,10 +61,8 @@ class BufferDataManagerTest {
             scrollbackMaxLines = 100,
         )
 
-        assertEquals(3, storage.lineCount)
-        for (index in 0 until storage.lineCount) {
-            assertTrue(storage.lineSnapshot(index).isEmpty())
-        }
+        assertEquals(1, storage.lineCount)
+        assertTrue(storage.lineSnapshot(0).isEmpty())
     }
 
     @Test
@@ -78,9 +78,8 @@ class BufferDataManagerTest {
             scrollbackMaxLines = 100,
         )
 
-        assertEquals(2, storage.lineCount)
+        assertEquals(1, storage.lineCount)
         assertTrue(storage.lineSnapshot(0).isEmpty())
-        assertTrue(storage.lineSnapshot(1).isEmpty())
     }
 
     @Test
@@ -94,7 +93,6 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 100,
             )
 
-        storage.removeFirstLine()
         storage.removeFirstLine()
 
         assertEquals(0, manager.maxViewportTopLineIndex)
@@ -126,6 +124,8 @@ class BufferDataManagerTest {
 
         storage.appendLine(lineOf("a"))
         storage.appendLine(lineOf("b"))
+        storage.appendLine(lineOf("c"))
+        storage.appendLine(lineOf("d"))
 
         assertEquals(2, manager.maxViewportTopLineIndex)
     }
@@ -160,6 +160,8 @@ class BufferDataManagerTest {
 
         storage.appendLine(lineOf("a"))
         storage.appendLine(lineOf("b"))
+        storage.appendLine(lineOf("c"))
+        storage.appendLine(lineOf("d"))
 
         manager.setViewportTopLineIndex(1)
         assertEquals(1, manager.viewportTopLineIndex)
@@ -218,6 +220,8 @@ class BufferDataManagerTest {
 
         storage.appendLine(lineOf("a"))
         storage.appendLine(lineOf("b"))
+        storage.appendLine(lineOf("c"))
+        storage.appendLine(lineOf("d"))
         manager.setViewportTopLineIndex(2)
 
         assertEquals(2, manager.storageIndexForScreenRow(0))
@@ -236,9 +240,8 @@ class BufferDataManagerTest {
             )
 
         storage.removeFirstLine()
-        storage.removeFirstLine()
 
-        assertEquals(0, manager.storageIndexForScreenRow(0))
+        assertNull(manager.storageIndexForScreenRow(0))
         assertNull(manager.storageIndexForScreenRow(1))
         assertNull(manager.storageIndexForScreenRow(2))
     }
@@ -272,6 +275,45 @@ class BufferDataManagerTest {
         assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 5, row = 0) }
         assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 0, row = -1) }
         assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 0, row = 3) }
+    }
+
+    @Test
+    fun `cursor move rejects empty destination when visible content exists`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 5,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(0, lineOf("ab"))
+        manager.setCursorPosition(column = 0, row = 0)
+
+        assertFailsWith<IndexOutOfBoundsException> {
+            manager.moveCursorRight(3)
+        }
+        assertEquals(CursorPosition(column = 0, row = 0), manager.cursorPosition)
+    }
+
+    @Test
+    fun `cursor can move back to write frontier after stepping left`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 6,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+
+        manager.writeText("abc")
+        assertEquals(CursorPosition(column = 3, row = 0), manager.cursorPosition)
+
+        manager.moveCursorLeft(1)
+        assertEquals(CursorPosition(column = 2, row = 0), manager.cursorPosition)
+
+        manager.moveCursorRight(1)
+        assertEquals(CursorPosition(column = 3, row = 0), manager.cursorPosition)
     }
 
     @Test
@@ -371,6 +413,8 @@ class BufferDataManagerTest {
             )
         storage.appendLine(lineOf("a"))
         storage.appendLine(lineOf("b"))
+        storage.appendLine(lineOf("c"))
+        storage.appendLine(lineOf("d"))
         manager.setViewportTopLineIndex(1)
         assertNotEquals(manager.maxViewportTopLineIndex, manager.viewportTopLineIndex)
         assertTrue(!manager.viewportPinnedToBottom)
@@ -391,12 +435,12 @@ class BufferDataManagerTest {
                 screenHeight = 3,
                 scrollbackMaxLines = 100,
             )
-        storage.appendLine(lineOf("a"))
-        storage.appendLine(lineOf("b"))
+        storage.appendLine(lineOf("ab"))
+        storage.appendLine(lineOf("cd"))
         manager.pinViewportToBottom()
         val pinnedTop = manager.viewportTopLineIndex
 
-        manager.setCursorPosition(column = 1, row = 1)
+        manager.setCursorPosition(column = 0, row = 1)
         manager.moveCursorRight(1)
 
         assertEquals(pinnedTop, manager.viewportTopLineIndex)
@@ -446,6 +490,228 @@ class BufferDataManagerTest {
     }
 
     @Test
+    fun `screen per-cell reads use wrapped viewport rows and default empty cells`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(0, lineOf("ABCDE"))
+        storage.appendLine(lineOf("xy"))
+        storage.appendLine(lineOf("z"))
+
+        assertEquals('A'.code, manager.characterAt(BufferRegion.SCREEN, row = 0, column = 0))
+        assertEquals('D'.code, manager.characterAt(BufferRegion.SCREEN, row = 1, column = 0))
+        assertEquals('E'.code, manager.characterAt(BufferRegion.SCREEN, row = 1, column = 1))
+        assertNull(manager.characterAt(BufferRegion.SCREEN, row = 1, column = 2))
+        assertEquals('x'.code, manager.characterAt(BufferRegion.SCREEN, row = 2, column = 0))
+        assertEquals('y'.code, manager.characterAt(BufferRegion.SCREEN, row = 2, column = 1))
+        assertNull(manager.characterAt(BufferRegion.SCREEN, row = 2, column = 2))
+    }
+
+    @Test
+    fun `screen attributes read existing and missing cells correctly`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        val custom = CellAttributes(foreground = TerminalColor.BRIGHT_CYAN, underline = true)
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell.fromChar('A'),
+                    TerminalCell.fromChar('B'),
+                    TerminalCell.fromChar('C'),
+                    TerminalCell(codePoint = 'D'.code, attributes = custom),
+                    TerminalCell.fromChar('E'),
+                ),
+            ),
+        )
+
+        assertEquals(custom, manager.attributesAt(BufferRegion.SCREEN, row = 1, column = 0))
+        assertEquals(CellAttributes(), manager.attributesAt(BufferRegion.SCREEN, row = 1, column = 2))
+    }
+
+    @Test
+    fun `screen read methods validate row and column bounds`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCREEN, row = -1, column = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCREEN, row = 2, column = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCREEN, row = 0, column = -1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCREEN, row = 0, column = 3) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.attributesAt(BufferRegion.SCREEN, row = 0, column = 3) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.lineAsString(BufferRegion.SCREEN, row = -1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.lineAsString(BufferRegion.SCREEN, row = 2) }
+    }
+
+    @Test
+    fun `scrollback per-cell reads use oldest-first indexing`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        val custom = CellAttributes(foreground = TerminalColor.BRIGHT_MAGENTA, bold = true)
+        storage.replaceLine(0, lineOf("ab"))
+        storage.appendLine(
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell(codePoint = 'c'.code, attributes = custom),
+                    TerminalCell.fromChar('d'),
+                ),
+            ),
+        )
+        storage.appendLine(lineOf("ef"))
+        storage.appendLine(lineOf("gh"))
+        manager.setViewportTopLineIndex(2)
+
+        assertEquals('a'.code, manager.characterAt(BufferRegion.SCROLLBACK, row = 0, column = 0))
+        assertEquals('d'.code, manager.characterAt(BufferRegion.SCROLLBACK, row = 1, column = 1))
+        assertEquals(custom, manager.attributesAt(BufferRegion.SCROLLBACK, row = 1, column = 0))
+    }
+
+    @Test
+    fun `scrollback read methods validate row and logical column bounds`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(0, lineOf("ab"))
+        storage.appendLine(lineOf("cd"))
+        storage.appendLine(lineOf("ef"))
+        storage.appendLine(lineOf("gh"))
+        manager.setViewportTopLineIndex(2)
+
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCROLLBACK, row = -1, column = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCROLLBACK, row = 2, column = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCROLLBACK, row = 0, column = -1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.characterAt(BufferRegion.SCROLLBACK, row = 0, column = 2) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.attributesAt(BufferRegion.SCROLLBACK, row = 0, column = 2) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.lineAsString(BufferRegion.SCROLLBACK, row = 2) }
+    }
+
+    @Test
+    fun `line as string returns fixed width for screen and logical width for scrollback`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell.fromChar('a'),
+                    TerminalCell(),
+                    TerminalCell.fromChar('b'),
+                ),
+            ),
+        )
+        storage.appendLine(lineOf("CD"))
+        storage.appendLine(lineOf("QRS"))
+        manager.setViewportTopLineIndex(1)
+
+        assertEquals("a b", manager.lineAsString(BufferRegion.SCROLLBACK, row = 0))
+        assertEquals("CD ", manager.lineAsString(BufferRegion.SCREEN, row = 0))
+    }
+
+    @Test
+    fun `screen content string joins visible rows with newline and no trailing newline`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(0, lineOf("AB"))
+        storage.appendLine(lineOf("CD"))
+
+        val content = manager.screenContentAsString()
+
+        assertEquals("AB  \nCD  ", content)
+        assertFalse(content.endsWith("\n"))
+    }
+
+    @Test
+    fun `screen and scrollback content string orders scrollback before screen`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell.fromChar('O'),
+                    TerminalCell(),
+                ),
+            ),
+        )
+        storage.appendLine(lineOf("P"))
+        storage.appendLine(lineOf("QRS"))
+        storage.appendLine(lineOf("TU"))
+        manager.setViewportTopLineIndex(2)
+
+        val content = manager.screenAndScrollbackContentAsString()
+
+        assertEquals("O \nP\nQRS\nTU ", content)
+        assertFalse(content.endsWith("\n"))
+    }
+
+    @Test
+    fun `string read outputs preserve supplementary unicode code points`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 1,
+                screenHeight = 1,
+                scrollbackMaxLines = 100,
+            )
+        val grinning = 0x1F600
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(TerminalCell(codePoint = grinning)),
+            ),
+        )
+
+        val expected = String(Character.toChars(grinning))
+        assertEquals(expected, manager.screenContentAsString())
+    }
+
+    @Test
     fun `set current attributes updates state and has no side effects`() {
         val storage = InMemoryLineStorage()
         val managerWithState =
@@ -466,8 +732,12 @@ class BufferDataManagerTest {
 
         storage.appendLine(lineOf("a"))
         storage.appendLine(lineOf("b"))
-        managerWithState.setViewportTopLineIndex(1)
-        managerWithState.setCursorPosition(column = 2, row = 1)
+        storage.appendLine(lineOf("c"))
+        storage.appendLine(lineOf("d"))
+        storage.replaceLine(3, lineOf("abc"))
+        storage.replaceLine(4, lineOf("def"))
+        managerWithState.setViewportTopLineIndex(2)
+        managerWithState.setCursorPosition(column = 1, row = 1)
         val beforeCursor = managerWithState.cursorPosition
         val beforeTop = managerWithState.viewportTopLineIndex
         val beforePinned = managerWithState.viewportPinnedToBottom
@@ -580,7 +850,7 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 4,
             )
         storage.replaceLine(0, lineOf("abc"))
-        storage.replaceLine(1, lineOf("def"))
+        storage.appendLine(lineOf("def"))
         manager.setCursorPosition(column = 1, row = 0)
 
         manager.insertText("X")
@@ -604,7 +874,7 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 1,
             )
         storage.replaceLine(0, lineOf("ab"))
-        storage.replaceLine(1, lineOf("cd"))
+        storage.appendLine(lineOf("cd"))
         manager.setCursorPosition(column = 1, row = 1)
 
         manager.insertText("X")
@@ -618,7 +888,7 @@ class BufferDataManagerTest {
     }
 
     @Test
-    fun `insert text pads gap when cursor is beyond current line length`() {
+    fun `cursor cannot be set to empty cell when visible content exists`() {
         val storage = InMemoryLineStorage()
         val manager =
             BufferDataManager(
@@ -628,16 +898,10 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 2,
             )
         storage.replaceLine(0, lineOf("ab"))
-        manager.setCursorPosition(column = 4, row = 0)
 
-        manager.insertText("Z")
-
-        val frame = manager.composeRenderFrame()
-        assertEquals(
-            listOf('a'.code, 'b'.code, null, null, 'Z'.code),
-            frame.rows[0].map { it.codePoint },
-        )
-        assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
+        assertFailsWith<IndexOutOfBoundsException> {
+            manager.setCursorPosition(column = 4, row = 0)
+        }
     }
 
     @Test
@@ -664,7 +928,7 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 6,
             )
         insertStorage.replaceLine(0, lineOf("abc"))
-        insertStorage.replaceLine(1, lineOf("def"))
+        insertStorage.appendLine(lineOf("def"))
         insertManager.setCursorPosition(column = 0, row = 0)
 
         insertManager.insertText("WXYZ")
@@ -685,7 +949,7 @@ class BufferDataManagerTest {
         storage.appendLine(lineOf("111"))
         storage.appendLine(lineOf("222"))
         storage.appendLine(lineOf("333"))
-        manager.setViewportTopLineIndex(0)
+        manager.setViewportTopLineIndex(1)
         assertTrue(!manager.viewportPinnedToBottom)
 
         manager.setCursorPosition(column = 0, row = 0)
@@ -708,8 +972,8 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 2,
             )
         storage.replaceLine(0, lineOf("abcd"))
-        storage.replaceLine(1, lineOf("xy"))
-        manager.setCursorPosition(column = 2, row = 1)
+        storage.appendLine(lineOf("xy"))
+        manager.setCursorPosition(column = 1, row = 1)
 
         val beforeCursor = manager.cursorPosition
         val beforeFrame = manager.composeRenderFrame()
@@ -789,7 +1053,7 @@ class BufferDataManagerTest {
                 scrollbackMaxLines = 0,
             )
         storage.replaceLine(0, lineOf("abc"))
-        storage.replaceLine(1, lineOf("def"))
+        storage.appendLine(lineOf("def"))
         manager.setCursorPosition(column = 1, row = 0)
 
         manager.insertEmptyLineAtBottom()
@@ -799,6 +1063,99 @@ class BufferDataManagerTest {
         assertEquals(listOf('d'.code, 'e'.code, 'f'.code), frame.rows[0].map { it.codePoint })
         assertEquals(listOf(null, null, null), frame.rows[1].map { it.codePoint })
         assertEquals(CursorPosition(column = 1, row = 0), manager.cursorPosition)
+    }
+
+    @Test
+    fun `clear screen keeps scrollback and resets visible area to empty`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 2,
+            )
+        storage.replaceLine(0, lineOf("abc"))
+        storage.appendLine(lineOf("def"))
+        storage.appendLine(lineOf("ghi"))
+        storage.appendLine(lineOf("jkl"))
+        manager.pinViewportToBottom()
+        manager.setCursorPosition(column = 2, row = 1)
+
+        manager.clearScreen()
+
+        assertEquals(4, storage.lineCount)
+        assertEquals(CursorPosition(column = 0, row = 0), manager.cursorPosition)
+        assertEquals("   \n   ", manager.screenContentAsString())
+        assertEquals("ghi\njkl\n   \n   ", manager.screenAndScrollbackContentAsString())
+    }
+
+    @Test
+    fun `clear screen and scrollback resets storage and cursor`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 5,
+            )
+        storage.replaceLine(0, lineOf("abcd"))
+        storage.appendLine(lineOf("efgh"))
+        storage.appendLine(lineOf("ijkl"))
+        manager.pinViewportToBottom()
+        manager.setCursorPosition(column = 3, row = 1)
+
+        manager.clearScreenAndScrollback()
+
+        assertEquals(1, storage.lineCount)
+        assertEquals(0, manager.viewportTopLineIndex)
+        assertTrue(manager.viewportPinnedToBottom)
+        assertEquals(CursorPosition(column = 0, row = 0), manager.cursorPosition)
+        assertEquals("    \n    ", manager.screenAndScrollbackContentAsString())
+    }
+
+    @Test
+    fun `resize preserves logical lines attributes and clamps cursor`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 5,
+                screenHeight = 2,
+                scrollbackMaxLines = 2,
+            )
+        val cellAttributes = CellAttributes(foreground = TerminalColor.BRIGHT_BLUE, bold = true)
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell.fromChar('X', attributes = cellAttributes),
+                    TerminalCell(),
+                ),
+            ),
+        )
+        storage.appendLine(lineOf("YZ"))
+        storage.appendLine(lineOf("Q"))
+        manager.pinViewportToBottom()
+        manager.setCurrentAttributes(CellAttributes(foreground = TerminalColor.BRIGHT_RED, underline = true))
+        manager.setCursorPosition(column = 0, row = 1)
+
+        manager.resize(screenWidth = 3, screenHeight = 3)
+
+        assertEquals(3, manager.screenWidth)
+        assertEquals(3, manager.screenHeight)
+        assertEquals(3, storage.lineCount)
+        assertEquals('X'.code, storage.lineSnapshot(0)[0].codePoint)
+        assertEquals(cellAttributes, storage.lineSnapshot(0)[0].attributes)
+        assertEquals(listOf('Y'.code, 'Z'.code), storage.lineSnapshot(1).map { it.codePoint })
+        assertEquals(listOf('Q'.code), storage.lineSnapshot(2).map { it.codePoint })
+        assertEquals(
+            CellAttributes(foreground = TerminalColor.BRIGHT_RED, underline = true),
+            manager.currentAttributes,
+        )
+        assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
+        assertTrue(manager.viewportPinnedToBottom)
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })

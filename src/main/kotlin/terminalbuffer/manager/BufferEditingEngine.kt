@@ -47,7 +47,11 @@ internal class BufferEditingEngine(
         pinViewportToBottom()
 
         val reference = rowReferenceForScreenRow(startCursor.row)
-        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val storageIndex =
+            ensureStorageIndexForScreenRow(
+                screenRow = startCursor.row,
+                reference = reference,
+            )
         val startAbsoluteColumn = reference.startColumnIndex + startCursor.column
         var absoluteColumn = startAbsoluteColumn
 
@@ -87,7 +91,11 @@ internal class BufferEditingEngine(
         pinViewportToBottom()
 
         val reference = rowReferenceForScreenRow(startCursor.row)
-        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val storageIndex =
+            ensureStorageIndexForScreenRow(
+                screenRow = startCursor.row,
+                reference = reference,
+            )
         val startAbsoluteColumn = reference.startColumnIndex + startCursor.column
         var absoluteColumn = startAbsoluteColumn
 
@@ -122,7 +130,11 @@ internal class BufferEditingEngine(
         pinViewportToBottom()
 
         val reference = rowReferenceForScreenRow(cursor.row)
-        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val storageIndex =
+            ensureStorageIndexForScreenRow(
+                screenRow = cursor.row,
+                reference = reference,
+            )
         val startColumnIndex = reference.startColumnIndex
         val fillCell =
             if (character == null) {
@@ -152,15 +164,22 @@ internal class BufferEditingEngine(
         appendBottomLineForScroll()
     }
 
-    private fun ensureStorageIndexForRowReference(reference: WrappedViewportMapper.RowReference): Int {
+    private fun ensureStorageIndexForScreenRow(
+        screenRow: Int,
+        reference: WrappedViewportMapper.RowReference,
+    ): Int {
         reference.lineIndex?.let { return it }
 
-        storage.appendLine(BufferLine.empty())
-        enforceScrollbackLimit()
-        pinViewportToBottom()
+        while (true) {
+            storage.appendLine(BufferLine.empty())
+            enforceScrollbackLimit()
+            pinViewportToBottom()
 
-        return rowReferenceForScreenRow(screenHeight - 1).lineIndex
-            ?: throw IllegalStateException("Unable to resolve storage line for editing row")
+            val resolved = rowReferenceForScreenRow(screenRow).lineIndex
+            if (resolved != null) {
+                return resolved
+            }
+        }
     }
 
     private fun enforceScrollbackLimit() {

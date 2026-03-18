@@ -1,7 +1,7 @@
 package terminalbuffer.editor
 
 import terminalbuffer.contracts.BufferRegion
-import terminalbuffer.contracts.TerminalBufferContract
+import terminalbuffer.contracts.ResizableTerminalBuffer
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
 import terminalbuffer.manager.BufferDataManager
@@ -22,7 +22,7 @@ import terminalbuffer.storage.InMemoryLineStorage
 class TerminalEditor(
     private val manager: BufferDataManager,
     private val renderer: TerminalRenderer,
-) : TerminalBufferContract {
+) : ResizableTerminalBuffer {
     override val screenWidth: Int
         get() = manager.screenWidth
 
@@ -81,32 +81,58 @@ class TerminalEditor(
         manager.insertEmptyLineAtBottom()
     }
 
-    override fun clearScreen() = unsupported("clearScreen")
+    override fun clearScreen() {
+        manager.clearScreen()
+    }
 
-    override fun clearScreenAndScrollback() = unsupported("clearScreenAndScrollback")
+    override fun clearScreenAndScrollback() {
+        manager.clearScreenAndScrollback()
+    }
 
     override fun characterAt(
         region: BufferRegion,
         row: Int,
         column: Int,
-    ): Int? = unsupported("characterAt")
+    ): Int? = manager.characterAt(region = region, row = row, column = column)
 
     override fun attributesAt(
         region: BufferRegion,
         row: Int,
         column: Int,
-    ): CellAttributes = unsupported("attributesAt")
+    ): CellAttributes = manager.attributesAt(region = region, row = row, column = column)
 
     override fun lineAsString(
         region: BufferRegion,
         row: Int,
-    ): String = unsupported("lineAsString")
+    ): String = manager.lineAsString(region = region, row = row)
 
-    override fun screenContentAsString(): String = unsupported("screenContentAsString")
+    override fun screenContentAsString(): String = manager.screenContentAsString()
 
-    override fun screenAndScrollbackContentAsString(): String = unsupported("screenAndScrollbackContentAsString")
+    override fun screenAndScrollbackContentAsString(): String = manager.screenAndScrollbackContentAsString()
 
     override fun composeRenderFrame(): RenderFrame = manager.composeRenderFrame()
+
+    /**
+     * Returns backing logical storage line index for one visible screen row.
+     *
+     * @param screenRow zero-based visible screen row
+     * @return backing logical line index, or null when no line exists for that row
+     * @throws IndexOutOfBoundsException when [screenRow] is outside screen bounds
+     */
+    override fun actualLineIndexForScreenRow(screenRow: Int): Int? = manager.actualLineIndexForScreenRow(screenRow)
+
+    /**
+     * Resizes editor in place while preserving canonical lines, cursor, and attributes.
+     *
+     * @param screenWidth target screen width in cells
+     * @param screenHeight target screen height in rows
+     */
+    override fun resize(
+        screenWidth: Int,
+        screenHeight: Int,
+    ) {
+        manager.resize(screenWidth = screenWidth, screenHeight = screenHeight)
+    }
 
     /**
      * Renders the current manager state by composing a fresh frame and passing it to renderer.
@@ -114,8 +140,6 @@ class TerminalEditor(
      * @return renderer output for current frame state
      */
     fun renderCurrentFrame(): String = renderer.render(composeRenderFrame())
-
-    private fun unsupported(operation: String): Nothing = throw UnsupportedOperationException("$operation is not available in Phase 2.6")
 
     companion object {
         /**

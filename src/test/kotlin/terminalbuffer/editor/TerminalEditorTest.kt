@@ -1,8 +1,10 @@
 package terminalbuffer.editor
 
 import terminalbuffer.contracts.BufferRegion
+import terminalbuffer.domain.BufferLine
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
+import terminalbuffer.domain.TerminalCell
 import terminalbuffer.domain.TerminalColor
 import terminalbuffer.manager.BufferDataManager
 import terminalbuffer.render.RenderFrame
@@ -10,7 +12,6 @@ import terminalbuffer.render.TerminalRenderer
 import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class TerminalEditorTest {
@@ -55,16 +56,61 @@ class TerminalEditorTest {
     }
 
     @Test
-    fun `deferred contract methods throw unsupported operation`() {
-        val (editor, _, _) = createEditor()
+    fun `editor delegates clear operations to manager`() {
+        val (editor, manager, _) = createEditor(screenWidth = 3, screenHeight = 2)
+        editor.writeText("abc")
+        manager.insertEmptyLineAtBottom()
 
-        assertFailsWith<UnsupportedOperationException> { editor.clearScreen() }
-        assertFailsWith<UnsupportedOperationException> { editor.clearScreenAndScrollback() }
-        assertFailsWith<UnsupportedOperationException> { editor.characterAt(BufferRegion.SCREEN, 0, 0) }
-        assertFailsWith<UnsupportedOperationException> { editor.attributesAt(BufferRegion.SCREEN, 0, 0) }
-        assertFailsWith<UnsupportedOperationException> { editor.lineAsString(BufferRegion.SCREEN, 0) }
-        assertFailsWith<UnsupportedOperationException> { editor.screenContentAsString() }
-        assertFailsWith<UnsupportedOperationException> { editor.screenAndScrollbackContentAsString() }
+        editor.clearScreen()
+        val afterClear = editor.screenContentAsString()
+
+        editor.writeText("xy")
+        editor.clearScreenAndScrollback()
+        val afterClearAll = editor.screenAndScrollbackContentAsString()
+
+        assertEquals("   \n   ", afterClear)
+        assertEquals("   \n   ", afterClearAll)
+    }
+
+    @Test
+    fun `editor delegates read APIs to manager`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        val editor = TerminalEditor(manager = manager, renderer = CapturingRenderer(output = "ok"))
+        storage.replaceLine(
+            0,
+            BufferLine.fromCells(
+                listOf(
+                    TerminalCell.fromChar('a'),
+                    TerminalCell(),
+                    TerminalCell.fromChar('b'),
+                ),
+            ),
+        )
+        storage.appendLine(lineOf("CD"))
+        storage.appendLine(lineOf("QRS"))
+        manager.setViewportTopLineIndex(1)
+
+        assertEquals(
+            manager.characterAt(BufferRegion.SCREEN, row = 0, column = 0),
+            editor.characterAt(BufferRegion.SCREEN, row = 0, column = 0),
+        )
+        assertEquals(
+            manager.attributesAt(BufferRegion.SCREEN, row = 0, column = 2),
+            editor.attributesAt(BufferRegion.SCREEN, row = 0, column = 2),
+        )
+        assertEquals(
+            manager.lineAsString(BufferRegion.SCROLLBACK, row = 0),
+            editor.lineAsString(BufferRegion.SCROLLBACK, row = 0),
+        )
+        assertEquals(manager.screenContentAsString(), editor.screenContentAsString())
+        assertEquals(manager.screenAndScrollbackContentAsString(), editor.screenAndScrollbackContentAsString())
     }
 
     @Test
@@ -125,6 +171,36 @@ class TerminalEditorTest {
         assertEquals(1, customRenderer.renderCalls)
     }
 
+    @Test
+    fun `resize preserves content attributes and cursor using core manager state`() {
+        val customRenderer = CapturingRenderer(output = "rendered")
+        val editor =
+            TerminalEditor.create(
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 5,
+                renderer = customRenderer,
+            )
+        editor.writeText("AB  CDE")
+        val customAttributes = CellAttributes(background = TerminalColor.BRIGHT_GREEN, underline = true)
+        editor.setCurrentAttributes(customAttributes)
+        editor.setCursorPosition(column = 2, row = 1)
+
+        editor.resize(screenWidth = 2, screenHeight = 3)
+
+        assertEquals(2, editor.screenWidth)
+        assertEquals(3, editor.screenHeight)
+        assertEquals(5, editor.scrollbackMaxLines)
+        assertEquals(customAttributes, editor.currentAttributes)
+        assertEquals(CursorPosition(column = 1, row = 1), editor.cursorPosition)
+        assertEquals('A'.code, editor.characterAt(BufferRegion.SCREEN, row = 0, column = 0))
+        assertEquals('B'.code, editor.characterAt(BufferRegion.SCREEN, row = 0, column = 1))
+        assertEquals(' '.code, editor.characterAt(BufferRegion.SCREEN, row = 1, column = 0))
+        assertEquals(' '.code, editor.characterAt(BufferRegion.SCREEN, row = 1, column = 1))
+        assertEquals('C'.code, editor.characterAt(BufferRegion.SCREEN, row = 2, column = 0))
+        assertEquals('D'.code, editor.characterAt(BufferRegion.SCREEN, row = 2, column = 1))
+    }
+
     private fun createEditor(
         screenWidth: Int = 5,
         screenHeight: Int = 3,
@@ -155,6 +231,8 @@ class TerminalEditorTest {
             actual.rows.map { row -> row.map { it.codePoint } },
         )
     }
+
+    private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })
 
     private class CapturingRenderer(
         private val output: String,
