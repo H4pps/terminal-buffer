@@ -8,6 +8,7 @@ import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BufferDataManagerTest {
@@ -78,6 +79,166 @@ class BufferDataManagerTest {
         assertEquals(2, storage.lineCount)
         assertTrue(storage.lineSnapshot(0).isEmpty())
         assertTrue(storage.lineSnapshot(1).isEmpty())
+    }
+
+    @Test
+    fun `max viewport top line index is zero when storage lines are fewer than screen height`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.removeFirstLine()
+        storage.removeFirstLine()
+
+        assertEquals(0, manager.maxViewportTopLineIndex)
+    }
+
+    @Test
+    fun `max viewport top line index is zero when storage lines equal screen height`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        assertEquals(0, manager.maxViewportTopLineIndex)
+    }
+
+    @Test
+    fun `max viewport top line index matches overflow when storage lines exceed screen height`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+
+        assertEquals(2, manager.maxViewportTopLineIndex)
+    }
+
+    @Test
+    fun `set viewport top line index validates bounds`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.appendLine(lineOf("a"))
+
+        assertFailsWith<IndexOutOfBoundsException> { manager.setViewportTopLineIndex(-1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.setViewportTopLineIndex(2) }
+    }
+
+    @Test
+    fun `set viewport top line index updates pinned-to-bottom flag`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+
+        manager.setViewportTopLineIndex(1)
+        assertEquals(1, manager.viewportTopLineIndex)
+        assertTrue(!manager.viewportPinnedToBottom)
+
+        manager.setViewportTopLineIndex(2)
+        assertEquals(2, manager.viewportTopLineIndex)
+        assertTrue(manager.viewportPinnedToBottom)
+    }
+
+    @Test
+    fun `pin viewport to bottom sets top index to max and pinned true`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+        manager.setViewportTopLineIndex(0)
+
+        manager.pinViewportToBottom()
+
+        assertEquals(manager.maxViewportTopLineIndex, manager.viewportTopLineIndex)
+        assertTrue(manager.viewportPinnedToBottom)
+    }
+
+    @Test
+    fun `storage index for screen row validates row bounds`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        assertFailsWith<IndexOutOfBoundsException> { manager.storageIndexForScreenRow(-1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.storageIndexForScreenRow(3) }
+    }
+
+    @Test
+    fun `storage index for screen row returns concrete index when backing line exists`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+        manager.setViewportTopLineIndex(2)
+
+        assertEquals(2, manager.storageIndexForScreenRow(0))
+        assertEquals(4, manager.storageIndexForScreenRow(2))
+    }
+
+    @Test
+    fun `storage index for screen row returns null when mapped row has no backing storage line`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 80,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        storage.removeFirstLine()
+        storage.removeFirstLine()
+
+        assertEquals(0, manager.storageIndexForScreenRow(0))
+        assertNull(manager.storageIndexForScreenRow(1))
+        assertNull(manager.storageIndexForScreenRow(2))
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })

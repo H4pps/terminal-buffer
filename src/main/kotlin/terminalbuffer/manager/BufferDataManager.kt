@@ -27,6 +27,14 @@ class BufferDataManager(
     val scrollbackMaxLines: Int,
 ) {
     /**
+     * Maximum valid value for [viewportTopLineIndex] based on current storage size and screen height.
+     *
+     * Returns `0` when storage has at most one visible screen page of lines.
+     */
+    val maxViewportTopLineIndex: Int
+        get() = (storage.lineCount - screenHeight).coerceAtLeast(0)
+
+    /**
      * Current cursor position in screen coordinates.
      */
     var cursorPosition: CursorPosition = CursorPosition(column = 0, row = 0)
@@ -62,6 +70,52 @@ class BufferDataManager(
         }
 
         bootstrapEmptyScreen()
+    }
+
+    /**
+     * Sets [viewportTopLineIndex] to [topLineIndex].
+     *
+     * The value must be inside `0..maxViewportTopLineIndex` for current storage state.
+     * This method also updates [viewportPinnedToBottom].
+     *
+     * @param topLineIndex desired top visible logical-line index
+     * @throws IndexOutOfBoundsException when [topLineIndex] is outside `0..maxViewportTopLineIndex`
+     */
+    fun setViewportTopLineIndex(topLineIndex: Int) {
+        if (topLineIndex !in 0..maxViewportTopLineIndex) {
+            throw IndexOutOfBoundsException(
+                "Viewport top index $topLineIndex is outside valid range 0..$maxViewportTopLineIndex",
+            )
+        }
+
+        viewportTopLineIndex = topLineIndex
+        viewportPinnedToBottom = topLineIndex == maxViewportTopLineIndex
+    }
+
+    /**
+     * Pins viewport to the newest visible page of content.
+     */
+    fun pinViewportToBottom() {
+        viewportTopLineIndex = maxViewportTopLineIndex
+        viewportPinnedToBottom = true
+    }
+
+    /**
+     * Maps [screenRow] in the current viewport to its storage line index.
+     *
+     * @param screenRow zero-based row index in visible screen area
+     * @return mapped storage line index when backing line exists, or null otherwise
+     * @throws IndexOutOfBoundsException when [screenRow] is outside `0 until screenHeight`
+     */
+    fun storageIndexForScreenRow(screenRow: Int): Int? {
+        if (screenRow !in 0 until screenHeight) {
+            throw IndexOutOfBoundsException(
+                "Screen row $screenRow is outside valid range 0..${screenHeight - 1}",
+            )
+        }
+
+        val mappedIndex = viewportTopLineIndex + screenRow
+        return if (mappedIndex in 0 until storage.lineCount) mappedIndex else null
     }
 
     private fun bootstrapEmptyScreen() {
