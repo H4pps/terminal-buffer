@@ -182,6 +182,18 @@ class BufferDataManager(
         updateViewportForCursorRow()
     }
 
+    /**
+     * Sets currently active cell [attributes] for subsequent edit operations.
+     *
+     * This updates only attribute state. Cursor position, viewport state, and storage content remain
+     * unchanged.
+     *
+     * @param attributes new current attributes
+     */
+    fun setCurrentAttributes(attributes: CellAttributes) {
+        currentAttributes = attributes
+    }
+
     private fun bootstrapEmptyScreen() {
         storage.clear()
         repeat(screenHeight) {

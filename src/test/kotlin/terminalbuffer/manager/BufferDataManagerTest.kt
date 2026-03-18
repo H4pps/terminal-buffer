@@ -4,6 +4,7 @@ import terminalbuffer.domain.BufferLine
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
 import terminalbuffer.domain.TerminalCell
+import terminalbuffer.domain.TerminalColor
 import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -400,6 +401,46 @@ class BufferDataManagerTest {
 
         assertEquals(pinnedTop, manager.viewportTopLineIndex)
         assertTrue(manager.viewportPinnedToBottom)
+    }
+
+    @Test
+    fun `set current attributes updates state and has no side effects`() {
+        val storage = InMemoryLineStorage()
+        val managerWithState =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        val custom =
+            CellAttributes(
+                foreground = TerminalColor.BRIGHT_CYAN,
+                background = TerminalColor.RED,
+                bold = true,
+                italic = true,
+                underline = true,
+            )
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+        managerWithState.setViewportTopLineIndex(1)
+        managerWithState.setCursorPosition(column = 2, row = 1)
+        val beforeCursor = managerWithState.cursorPosition
+        val beforeTop = managerWithState.viewportTopLineIndex
+        val beforePinned = managerWithState.viewportPinnedToBottom
+        val beforeLineCount = storage.lineCount
+
+        managerWithState.setCurrentAttributes(CellAttributes(foreground = TerminalColor.MAGENTA, italic = true))
+        managerWithState.setCurrentAttributes(custom)
+        managerWithState.moveCursorRight(1)
+        managerWithState.moveCursorLeft(1)
+
+        assertEquals(custom, managerWithState.currentAttributes)
+        assertEquals(beforeCursor, managerWithState.cursorPosition)
+        assertEquals(beforeTop, managerWithState.viewportTopLineIndex)
+        assertEquals(beforePinned, managerWithState.viewportPinnedToBottom)
+        assertEquals(beforeLineCount, storage.lineCount)
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })
