@@ -1,6 +1,5 @@
 package terminalbuffer.manager
 
-import terminalbuffer.domain.BufferLine
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
 import terminalbuffer.storage.MutableLineStorage
@@ -26,13 +25,16 @@ class BufferDataManager(
     val screenHeight: Int,
     val scrollbackMaxLines: Int,
 ) {
+    private val viewportController: ViewportController
+    private val cursorController: CursorController
+
     /**
      * Maximum valid value for [viewportTopLineIndex] based on current storage size and screen height.
      *
      * Returns `0` when storage has at most one visible screen page of lines.
      */
     val maxViewportTopLineIndex: Int
-        get() = (storage.lineCount - screenHeight).coerceAtLeast(0)
+        get() = viewportController.maxTopIndex
 
     /**
      * Current cursor position in screen coordinates.
@@ -69,7 +71,16 @@ class BufferDataManager(
             "Scrollback maximum lines must be non-negative: $scrollbackMaxLines"
         }
 
-        bootstrapEmptyScreen()
+        StorageBootstrapper.bootstrapEmptyScreen(storage = storage, screenHeight = screenHeight)
+        viewportController = ViewportController(storage = storage, screenHeight = screenHeight)
+        cursorController =
+            CursorController(
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                initial = cursorPosition,
+                onBottomRowReached = { pinViewportToBottom() },
+            )
+        refreshPublishedState()
     }
 
     /**
@@ -82,22 +93,16 @@ class BufferDataManager(
      * @throws IndexOutOfBoundsException when [topLineIndex] is outside `0..maxViewportTopLineIndex`
      */
     fun setViewportTopLineIndex(topLineIndex: Int) {
-        if (topLineIndex !in 0..maxViewportTopLineIndex) {
-            throw IndexOutOfBoundsException(
-                "Viewport top index $topLineIndex is outside valid range 0..$maxViewportTopLineIndex",
-            )
-        }
-
-        viewportTopLineIndex = topLineIndex
-        viewportPinnedToBottom = topLineIndex == maxViewportTopLineIndex
+        viewportController.setTopLineIndex(topLineIndex)
+        refreshPublishedState()
     }
 
     /**
      * Pins viewport to the newest visible page of content.
      */
     fun pinViewportToBottom() {
-        viewportTopLineIndex = maxViewportTopLineIndex
-        viewportPinnedToBottom = true
+        viewportController.pinToBottom()
+        refreshPublishedState()
     }
 
     /**
@@ -107,16 +112,7 @@ class BufferDataManager(
      * @return mapped storage line index when backing line exists, or null otherwise
      * @throws IndexOutOfBoundsException when [screenRow] is outside `0 until screenHeight`
      */
-    fun storageIndexForScreenRow(screenRow: Int): Int? {
-        if (screenRow !in 0 until screenHeight) {
-            throw IndexOutOfBoundsException(
-                "Screen row $screenRow is outside valid range 0..${screenHeight - 1}",
-            )
-        }
-
-        val mappedIndex = viewportTopLineIndex + screenRow
-        return if (mappedIndex in 0 until storage.lineCount) mappedIndex else null
-    }
+    fun storageIndexForScreenRow(screenRow: Int): Int? = viewportController.storageIndexForScreenRow(screenRow)
 
     /**
      * Sets cursor to the exact [column]/[row] position.
@@ -129,9 +125,8 @@ class BufferDataManager(
         column: Int,
         row: Int,
     ) {
-        validateCursorTarget(column, row)
-        cursorPosition = CursorPosition(column = column, row = row)
-        updateViewportForCursorRow()
+        cursorController.setPosition(column, row)
+        refreshPublishedState()
     }
 
     /**
@@ -141,9 +136,8 @@ class BufferDataManager(
      * @throws IllegalArgumentException when [cells] is negative
      */
     fun moveCursorUp(cells: Int = 1) {
-        validateMovementCells(cells)
-        cursorPosition = cursorPosition.moveUp(cells).clampTo(screenWidth, screenHeight)
-        updateViewportForCursorRow()
+        cursorController.moveUp(cells)
+        refreshPublishedState()
     }
 
     /**
@@ -153,9 +147,8 @@ class BufferDataManager(
      * @throws IllegalArgumentException when [cells] is negative
      */
     fun moveCursorDown(cells: Int = 1) {
-        validateMovementCells(cells)
-        cursorPosition = cursorPosition.moveDown(cells).clampTo(screenWidth, screenHeight)
-        updateViewportForCursorRow()
+        cursorController.moveDown(cells)
+        refreshPublishedState()
     }
 
     /**
@@ -165,9 +158,8 @@ class BufferDataManager(
      * @throws IllegalArgumentException when [cells] is negative
      */
     fun moveCursorLeft(cells: Int = 1) {
-        validateMovementCells(cells)
-        cursorPosition = cursorPosition.moveLeft(cells).clampTo(screenWidth, screenHeight)
-        updateViewportForCursorRow()
+        cursorController.moveLeft(cells)
+        refreshPublishedState()
     }
 
     /**
@@ -177,9 +169,8 @@ class BufferDataManager(
      * @throws IllegalArgumentException when [cells] is negative
      */
     fun moveCursorRight(cells: Int = 1) {
-        validateMovementCells(cells)
-        cursorPosition = cursorPosition.moveRight(cells).clampTo(screenWidth, screenHeight)
-        updateViewportForCursorRow()
+        cursorController.moveRight(cells)
+        refreshPublishedState()
     }
 
     /**
@@ -194,36 +185,9 @@ class BufferDataManager(
         currentAttributes = attributes
     }
 
-    private fun bootstrapEmptyScreen() {
-        storage.clear()
-        repeat(screenHeight) {
-            storage.appendLine(BufferLine.empty())
-        }
-    }
-
-    private fun validateCursorTarget(
-        column: Int,
-        row: Int,
-    ) {
-        if (column !in 0 until screenWidth) {
-            throw IndexOutOfBoundsException(
-                "Cursor column $column is outside valid range 0..${screenWidth - 1}",
-            )
-        }
-        if (row !in 0 until screenHeight) {
-            throw IndexOutOfBoundsException(
-                "Cursor row $row is outside valid range 0..${screenHeight - 1}",
-            )
-        }
-    }
-
-    private fun validateMovementCells(cells: Int) {
-        require(cells >= 0) { "Movement cells must be non-negative: $cells" }
-    }
-
-    private fun updateViewportForCursorRow() {
-        if (cursorPosition.row == screenHeight - 1) {
-            pinViewportToBottom()
-        }
+    private fun refreshPublishedState() {
+        cursorPosition = cursorController.position
+        viewportTopLineIndex = viewportController.topLineIndex
+        viewportPinnedToBottom = viewportController.pinnedToBottom
     }
 }
