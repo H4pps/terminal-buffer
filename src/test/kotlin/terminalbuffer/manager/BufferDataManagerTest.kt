@@ -404,6 +404,51 @@ class BufferDataManagerTest {
     }
 
     @Test
+    fun `compose render frame keeps configured dimensions and current cursor`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+        manager.setCursorPosition(column = 3, row = 1)
+
+        val frame = manager.composeRenderFrame()
+
+        assertEquals(4, frame.width)
+        assertEquals(2, frame.height)
+        assertEquals(3, frame.cursorColumn)
+        assertEquals(1, frame.cursorRow)
+        assertEquals(2, frame.rows.size)
+        assertTrue(frame.rows.all { it.size == 4 })
+    }
+
+    @Test
+    fun `compose render frame truncates pads and fills missing rows with empty cells`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 4,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        storage.clear()
+        storage.appendLine(lineOf("ABCDE"))
+        storage.appendLine(lineOf("XY"))
+
+        val frame = manager.composeRenderFrame()
+
+        assertEquals(listOf('A', 'B', 'C', 'D').map { it.code }, frame.rows[0].map { it.codePoint })
+        assertEquals(
+            listOf('X'.code, 'Y'.code, null, null),
+            frame.rows[1].map { it.codePoint },
+        )
+        assertEquals(listOf(null, null, null, null), frame.rows[2].map { it.codePoint })
+    }
+
+    @Test
     fun `set current attributes updates state and has no side effects`() {
         val storage = InMemoryLineStorage()
         val managerWithState =

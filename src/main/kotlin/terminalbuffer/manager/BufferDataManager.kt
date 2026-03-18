@@ -2,6 +2,7 @@ package terminalbuffer.manager
 
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
+import terminalbuffer.render.RenderFrame
 import terminalbuffer.storage.MutableLineStorage
 
 /**
@@ -27,6 +28,7 @@ class BufferDataManager(
 ) {
     private val viewportController: ViewportController
     private val cursorController: CursorController
+    private val renderFrameComposer: RenderFrameComposer
 
     /**
      * Maximum valid value for [viewportTopLineIndex] based on current storage size and screen height.
@@ -80,6 +82,7 @@ class BufferDataManager(
                 initial = cursorPosition,
                 onBottomRowReached = { pinViewportToBottom() },
             )
+        renderFrameComposer = RenderFrameComposer()
         refreshPublishedState()
     }
 
@@ -172,6 +175,22 @@ class BufferDataManager(
         cursorController.moveRight(cells)
         refreshPublishedState()
     }
+
+    /**
+     * Composes an immutable visible frame for rendering.
+     *
+     * Rows are built from viewport-mapped storage lines, truncated to [screenWidth] and padded
+     * with empty cells when shorter or missing.
+     *
+     * @return renderer-ready immutable frame for the current visible screen
+     */
+    fun composeRenderFrame(): RenderFrame =
+        renderFrameComposer.compose(
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            cursorPosition = cursorPosition,
+            rowCellsProvider = { screenRow -> storageIndexForScreenRow(screenRow)?.let(storage::lineSnapshot) },
+        )
 
     /**
      * Sets currently active cell [attributes] for subsequent edit operations.
