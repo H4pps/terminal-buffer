@@ -57,10 +57,6 @@ class TerminalEditorTest {
     fun `deferred contract methods throw unsupported operation`() {
         val (editor, _, _) = createEditor()
 
-        assertFailsWith<UnsupportedOperationException> { editor.writeText("text") }
-        assertFailsWith<UnsupportedOperationException> { editor.insertText("text") }
-        assertFailsWith<UnsupportedOperationException> { editor.fillCurrentLine('x') }
-        assertFailsWith<UnsupportedOperationException> { editor.insertEmptyLineAtBottom() }
         assertFailsWith<UnsupportedOperationException> { editor.clearScreen() }
         assertFailsWith<UnsupportedOperationException> { editor.clearScreenAndScrollback() }
         assertFailsWith<UnsupportedOperationException> { editor.characterAt(BufferRegion.SCREEN, 0, 0) }
@@ -68,6 +64,20 @@ class TerminalEditorTest {
         assertFailsWith<UnsupportedOperationException> { editor.lineAsString(BufferRegion.SCREEN, 0) }
         assertFailsWith<UnsupportedOperationException> { editor.screenContentAsString() }
         assertFailsWith<UnsupportedOperationException> { editor.screenAndScrollbackContentAsString() }
+    }
+
+    @Test
+    fun `editor delegates first phase three editing operations`() {
+        val (editor, manager, _) = createEditor(screenWidth = 3, screenHeight = 2)
+
+        editor.writeText("ab")
+        editor.insertText("X")
+        editor.fillCurrentLine('Q')
+        editor.insertEmptyLineAtBottom()
+
+        val editorFrame = editor.composeRenderFrame()
+        val managerFrame = manager.composeRenderFrame()
+        assertFrameEquals(managerFrame, editorFrame)
     }
 
     private fun createEditor(

@@ -29,6 +29,7 @@ class BufferDataManager(
     private val viewportController: ViewportController
     private val cursorController: CursorController
     private val renderFrameComposer: RenderFrameComposer
+    private val editingEngine: BufferEditingEngine
 
     /**
      * Maximum valid value for [viewportTopLineIndex] based on current storage size and screen height.
@@ -83,6 +84,15 @@ class BufferDataManager(
                 onBottomRowReached = { pinViewportToBottom() },
             )
         renderFrameComposer = RenderFrameComposer()
+        editingEngine =
+            BufferEditingEngine(
+                storage = storage,
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                scrollbackMaxLines = scrollbackMaxLines,
+                pinViewportToBottom = ::pinViewportToBottom,
+                storageIndexForScreenRow = ::storageIndexForScreenRow,
+            )
         refreshPublishedState()
     }
 
@@ -191,6 +201,74 @@ class BufferDataManager(
             cursorPosition = cursorPosition,
             rowCellsProvider = { screenRow -> storageIndexForScreenRow(screenRow)?.let(storage::lineSnapshot) },
         )
+
+    /**
+     * Writes [text] using overwrite semantics from current cursor and [currentAttributes].
+     *
+     * Writing advances cursor left-to-right and wraps at [screenWidth]. If wrapping happens on the
+     * bottom row, screen scrolls by appending a new bottom line and moving top content to
+     * scrollback. Retention is enforced by [scrollbackMaxLines].
+     *
+     * @param text text to overwrite into the buffer
+     */
+    fun writeText(text: String) {
+        val target =
+            editingEngine.writeText(
+                text = text,
+                startCursor = cursorPosition,
+                attributes = currentAttributes,
+            )
+                ?: return
+
+        setCursorPosition(column = target.column, row = target.row)
+    }
+
+    /**
+     * Inserts [text] from current cursor and [currentAttributes].
+     *
+     * Insertion shifts existing cells to the right. Overflow beyond [screenWidth] is propagated to
+     * subsequent rows. If propagation reaches beyond bottom row, screen scrolls and retention is
+     * enforced by [scrollbackMaxLines].
+     *
+     * @param text text to insert into the buffer
+     */
+    fun insertText(text: String) {
+        val target =
+            editingEngine.insertText(
+                text = text,
+                startCursor = cursorPosition,
+                attributes = currentAttributes,
+            )
+                ?: return
+
+        setCursorPosition(column = target.column, row = target.row)
+    }
+
+    /**
+     * Fills the current cursor row with [character], or clears it when null.
+     *
+     * The target line is always exactly [screenWidth] cells. Non-null fill uses
+     * [currentAttributes]. Null fill uses default empty cells (`TerminalCell()`).
+     *
+     * @param character fill character, or null for empty default cells
+     */
+    fun fillCurrentLine(character: Char?) {
+        editingEngine.fillCurrentLine(
+            cursor = cursorPosition,
+            character = character,
+            attributes = currentAttributes,
+        )
+    }
+
+    /**
+     * Inserts one empty line at the bottom of the visible screen.
+     *
+     * This causes screen scroll by one row and enforces retention using [scrollbackMaxLines].
+     * Cursor position is preserved.
+     */
+    fun insertEmptyLineAtBottom() {
+        editingEngine.insertEmptyLineAtBottom()
+    }
 
     /**
      * Sets currently active cell [attributes] for subsequent edit operations.

@@ -63,13 +63,21 @@ class TerminalEditor(
         manager.moveCursorRight(cells)
     }
 
-    override fun writeText(text: String) = unsupported("writeText")
+    override fun writeText(text: String) {
+        manager.writeText(text)
+    }
 
-    override fun insertText(text: String) = unsupported("insertText")
+    override fun insertText(text: String) {
+        manager.insertText(text)
+    }
 
-    override fun fillCurrentLine(character: Char?) = unsupported("fillCurrentLine")
+    override fun fillCurrentLine(character: Char?) {
+        manager.fillCurrentLine(character)
+    }
 
-    override fun insertEmptyLineAtBottom() = unsupported("insertEmptyLineAtBottom")
+    override fun insertEmptyLineAtBottom() {
+        manager.insertEmptyLineAtBottom()
+    }
 
     override fun clearScreen() = unsupported("clearScreen")
 
