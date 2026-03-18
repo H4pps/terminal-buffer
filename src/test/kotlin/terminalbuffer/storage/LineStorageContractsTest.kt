@@ -5,6 +5,7 @@ import terminalbuffer.domain.TerminalCell
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class LineStorageContractsTest {
     @Test
@@ -101,6 +102,46 @@ class LineStorageContractsTest {
         assertEquals(2, storage.lineCount)
         assertEquals("a", storage.lineSnapshot(0).toText())
         assertEquals("b", storage.lineSnapshot(1).toText())
+    }
+
+    @Test
+    fun `stored lines preserve variable lengths without normalization`() {
+        val storage = InMemoryLineStorage()
+
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("longer-line"))
+        storage.appendLine(lineOf(""))
+
+        assertEquals(1, storage.lineSnapshot(0).size)
+        assertEquals(11, storage.lineSnapshot(1).size)
+        assertTrue(storage.lineSnapshot(2).isEmpty())
+    }
+
+    @Test
+    fun `mutable line edits stay local to selected line`() {
+        val storage = InMemoryLineStorage()
+        storage.appendLine(lineOf("ab"))
+        storage.appendLine(lineOf("cd"))
+
+        storage.mutableLine(0).insertAt(1, TerminalCell.fromChar('X'))
+
+        assertEquals("aXb", storage.lineSnapshot(0).toText())
+        assertEquals("cd", storage.lineSnapshot(1).toText())
+    }
+
+    @Test
+    fun `storage remains structurally valid across mixed operation sequence`() {
+        val storage = InMemoryLineStorage()
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("bb"))
+        storage.insertLine(1, lineOf("ccc"))
+        storage.replaceLine(0, lineOf("dddd"))
+        storage.mutableLine(2).append(TerminalCell.fromChar('E'))
+        storage.removeFirstLine()
+
+        assertEquals(2, storage.lineCount)
+        assertEquals("ccc", storage.lineSnapshot(0).toText())
+        assertEquals("bbE", storage.lineSnapshot(1).toText())
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })
