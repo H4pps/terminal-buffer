@@ -5,8 +5,10 @@ import terminalbuffer.contracts.TerminalBufferContract
 import terminalbuffer.domain.CellAttributes
 import terminalbuffer.domain.CursorPosition
 import terminalbuffer.manager.BufferDataManager
+import terminalbuffer.render.AnsiTerminalRenderer
 import terminalbuffer.render.RenderFrame
 import terminalbuffer.render.TerminalRenderer
+import terminalbuffer.storage.InMemoryLineStorage
 
 /**
  * Single public entry point that orchestrates manager mutation/read operations and rendering.
@@ -114,4 +116,31 @@ class TerminalEditor(
     fun renderCurrentFrame(): String = renderer.render(composeRenderFrame())
 
     private fun unsupported(operation: String): Nothing = throw UnsupportedOperationException("$operation is not available in Phase 2.6")
+
+    companion object {
+        /**
+         * Creates a default editor wiring with in-memory storage and ANSI renderer.
+         *
+         * @param screenWidth configured screen width in cells, must be positive
+         * @param screenHeight configured screen height in rows, must be positive
+         * @param scrollbackMaxLines maximum retained scrollback lines, must be non-negative
+         * @param renderer renderer used by [renderCurrentFrame], defaults to [AnsiTerminalRenderer]
+         * @return fully constructed editor instance
+         */
+        fun create(
+            screenWidth: Int,
+            screenHeight: Int,
+            scrollbackMaxLines: Int,
+            renderer: TerminalRenderer = AnsiTerminalRenderer(),
+        ): TerminalEditor {
+            val manager =
+                BufferDataManager(
+                    storage = InMemoryLineStorage(),
+                    screenWidth = screenWidth,
+                    screenHeight = screenHeight,
+                    scrollbackMaxLines = scrollbackMaxLines,
+                )
+            return TerminalEditor(manager = manager, renderer = renderer)
+        }
+    }
 }

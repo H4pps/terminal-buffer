@@ -11,6 +11,7 @@ import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class TerminalEditorTest {
     @Test
@@ -78,6 +79,50 @@ class TerminalEditorTest {
         val editorFrame = editor.composeRenderFrame()
         val managerFrame = manager.composeRenderFrame()
         assertFrameEquals(managerFrame, editorFrame)
+    }
+
+    @Test
+    fun `create factory builds editor with expected dimensions and scrollback`() {
+        val editor =
+            TerminalEditor.create(
+                screenWidth = 7,
+                screenHeight = 4,
+                scrollbackMaxLines = 11,
+            )
+
+        assertEquals(7, editor.screenWidth)
+        assertEquals(4, editor.screenHeight)
+        assertEquals(11, editor.scrollbackMaxLines)
+        assertEquals(CursorPosition(column = 0, row = 0), editor.cursorPosition)
+    }
+
+    @Test
+    fun `create factory uses default ansi renderer when omitted`() {
+        val editor = TerminalEditor.create(screenWidth = 3, screenHeight = 1, scrollbackMaxLines = 5)
+        editor.writeText("A")
+
+        val rendered = editor.renderCurrentFrame()
+
+        assertTrue(rendered.contains("\u001B["))
+        assertTrue(rendered.contains("A"))
+    }
+
+    @Test
+    fun `create factory uses provided renderer override`() {
+        val customRenderer = CapturingRenderer(output = "custom-render")
+        val editor =
+            TerminalEditor.create(
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 9,
+                renderer = customRenderer,
+            )
+        editor.writeText("Hi")
+
+        val rendered = editor.renderCurrentFrame()
+
+        assertEquals("custom-render", rendered)
+        assertEquals(1, customRenderer.renderCalls)
     }
 
     private fun createEditor(
