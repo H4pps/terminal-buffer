@@ -91,7 +91,7 @@ class BufferDataManager(
                 screenHeight = screenHeight,
                 scrollbackMaxLines = scrollbackMaxLines,
                 pinViewportToBottom = ::pinViewportToBottom,
-                storageIndexForScreenRow = ::storageIndexForScreenRow,
+                rowReferenceForScreenRow = ::rowReferenceForScreenRow,
             )
         refreshPublishedState()
     }
@@ -199,7 +199,12 @@ class BufferDataManager(
             screenWidth = screenWidth,
             screenHeight = screenHeight,
             cursorPosition = cursorPosition,
-            rowCellsProvider = { screenRow -> storageIndexForScreenRow(screenRow)?.let(storage::lineSnapshot) },
+            rowCellsProvider = { screenRow ->
+                val reference = rowReferenceForScreenRow(screenRow)
+                reference.lineIndex?.let { lineIndex ->
+                    storage.lineSnapshot(lineIndex).drop(reference.startColumnIndex)
+                }
+            },
         )
 
     /**
@@ -280,6 +285,22 @@ class BufferDataManager(
      */
     fun setCurrentAttributes(attributes: CellAttributes) {
         currentAttributes = attributes
+    }
+
+    private fun rowReferenceForScreenRow(screenRow: Int): WrappedViewportMapper.RowReference {
+        if (screenRow !in 0 until screenHeight) {
+            throw IndexOutOfBoundsException(
+                "Screen row $screenRow is outside valid range 0..${screenHeight - 1}",
+            )
+        }
+
+        return WrappedViewportMapper
+            .rowReferences(
+                storage = storage,
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                topLineIndex = viewportTopLineIndex,
+            )[screenRow]
     }
 
     private fun refreshPublishedState() {

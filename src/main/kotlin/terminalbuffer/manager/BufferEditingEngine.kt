@@ -17,7 +17,7 @@ import terminalbuffer.storage.MutableLineStorage
  * @param screenHeight visible screen height in rows
  * @param scrollbackMaxLines maximum retained scrollback line count
  * @param pinViewportToBottom callback that pins viewport before/after mutations when required
- * @param storageIndexForScreenRow callback that maps visible row to storage index
+ * @param rowReferenceForScreenRow callback that maps visible row to wrapped logical-line segment
  */
 internal class BufferEditingEngine(
     private val storage: MutableLineStorage,
@@ -25,7 +25,7 @@ internal class BufferEditingEngine(
     private val screenHeight: Int,
     private val scrollbackMaxLines: Int,
     private val pinViewportToBottom: () -> Unit,
-    private val storageIndexForScreenRow: (Int) -> Int?,
+    private val rowReferenceForScreenRow: (Int) -> WrappedViewportMapper.RowReference,
 ) {
     /**
      * Writes [text] with overwrite semantics from [startCursor] and [attributes].
@@ -46,22 +46,25 @@ internal class BufferEditingEngine(
 
         pinViewportToBottom()
 
-        var column = startCursor.column
-        var row = startCursor.row
+        val reference = rowReferenceForScreenRow(startCursor.row)
+        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val startAbsoluteColumn = reference.startColumnIndex + startCursor.column
+        var absoluteColumn = startAbsoluteColumn
+
         text.forEach { char ->
-            val storageIndex = ensureStorageIndexForScreenRow(screenRow = row)
             writeCellAt(
                 storageIndex = storageIndex,
-                column = column,
+                column = absoluteColumn,
                 cell = TerminalCell.fromChar(char = char, attributes = attributes),
             )
-
-            val (nextColumn, nextRow) = advanceCursorAfterWrite(column = column, row = row)
-            column = nextColumn
-            row = nextRow
+            absoluteColumn += 1
         }
 
-        return CursorPosition(column = column, row = row)
+        return cursorFromAbsoluteColumn(
+            startCursor = startCursor,
+            startAbsoluteColumn = startAbsoluteColumn,
+            endAbsoluteColumn = absoluteColumn,
+        )
     }
 
     /**
@@ -83,28 +86,25 @@ internal class BufferEditingEngine(
 
         pinViewportToBottom()
 
-        var column = startCursor.column
-        var row = startCursor.row
+        val reference = rowReferenceForScreenRow(startCursor.row)
+        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val startAbsoluteColumn = reference.startColumnIndex + startCursor.column
+        var absoluteColumn = startAbsoluteColumn
+
         text.forEach { char ->
-            val storageIndex = ensureStorageIndexForScreenRow(screenRow = row)
             insertCellAt(
                 storageIndex = storageIndex,
-                column = column,
+                column = absoluteColumn,
                 cell = TerminalCell.fromChar(char = char, attributes = attributes),
             )
-
-            val scrolledDuringOverflow = propagateOverflowFromRow(startRow = row)
-            val (nextColumn, nextRow) =
-                advanceCursorAfterInsert(
-                    column = column,
-                    row = row,
-                    scrolledDuringOverflow = scrolledDuringOverflow,
-                )
-            column = nextColumn
-            row = nextRow
+            absoluteColumn += 1
         }
 
-        return CursorPosition(column = column, row = row)
+        return cursorFromAbsoluteColumn(
+            startCursor = startCursor,
+            startAbsoluteColumn = startAbsoluteColumn,
+            endAbsoluteColumn = absoluteColumn,
+        )
     }
 
     /**
@@ -121,18 +121,27 @@ internal class BufferEditingEngine(
     ) {
         pinViewportToBottom()
 
-        val storageIndex = ensureStorageIndexForScreenRow(screenRow = cursor.row)
+        val reference = rowReferenceForScreenRow(cursor.row)
+        val storageIndex = ensureStorageIndexForRowReference(reference)
+        val startColumnIndex = reference.startColumnIndex
         val fillCell =
             if (character == null) {
                 TerminalCell()
             } else {
                 TerminalCell.fromChar(char = character, attributes = attributes)
             }
-
-        storage.replaceLine(
-            storageIndex,
-            BufferLine.fromCells(List(screenWidth) { fillCell }),
-        )
+        val line = storage.mutableLine(storageIndex)
+        repeat(screenWidth) { offset ->
+            val column = startColumnIndex + offset
+            while (line.length < column) {
+                line.append(TerminalCell())
+            }
+            if (line.length == column) {
+                line.append(fillCell)
+            } else {
+                line.set(column, fillCell)
+            }
+        }
     }
 
     /**
@@ -143,15 +152,15 @@ internal class BufferEditingEngine(
         appendBottomLineForScroll()
     }
 
-    private fun ensureStorageIndexForScreenRow(screenRow: Int): Int {
-        var mapped = storageIndexForScreenRow(screenRow)
-        while (mapped == null) {
-            storage.appendLine(BufferLine.empty())
-            enforceScrollbackLimit()
-            pinViewportToBottom()
-            mapped = storageIndexForScreenRow(screenRow)
-        }
-        return mapped
+    private fun ensureStorageIndexForRowReference(reference: WrappedViewportMapper.RowReference): Int {
+        reference.lineIndex?.let { return it }
+
+        storage.appendLine(BufferLine.empty())
+        enforceScrollbackLimit()
+        pinViewportToBottom()
+
+        return rowReferenceForScreenRow(screenHeight - 1).lineIndex
+            ?: throw IllegalStateException("Unable to resolve storage line for editing row")
     }
 
     private fun enforceScrollbackLimit() {
@@ -196,65 +205,16 @@ internal class BufferEditingEngine(
         line.insertAt(column, cell)
     }
 
-    private fun propagateOverflowFromRow(startRow: Int): Boolean {
-        var row = startRow
-        var carry: List<TerminalCell>? = null
-        var scrolled = false
-
-        while (true) {
-            val storageIndex = ensureStorageIndexForScreenRow(screenRow = row)
-            val current = storage.lineSnapshot(storageIndex)
-            val combined = if (carry == null) current else carry + current
-
-            if (combined.size <= screenWidth) {
-                if (carry != null) {
-                    storage.replaceLine(storageIndex, BufferLine.fromCells(combined))
-                }
-                return scrolled
-            }
-
-            storage.replaceLine(storageIndex, BufferLine.fromCells(combined.take(screenWidth)))
-            carry = combined.drop(screenWidth)
-
-            if (row < screenHeight - 1) {
-                row += 1
-            } else {
-                appendBottomLineForScroll()
-                scrolled = true
-                row = screenHeight - 1
-            }
-        }
-    }
-
-    private fun advanceCursorAfterWrite(
-        column: Int,
-        row: Int,
-    ): Pair<Int, Int> {
-        if (column < screenWidth - 1) {
-            return (column + 1) to row
-        }
-        if (row < screenHeight - 1) {
-            return 0 to (row + 1)
-        }
-
-        appendBottomLineForScroll()
-        return 0 to (screenHeight - 1)
-    }
-
-    private fun advanceCursorAfterInsert(
-        column: Int,
-        row: Int,
-        scrolledDuringOverflow: Boolean,
-    ): Pair<Int, Int> {
-        if (column < screenWidth - 1) {
-            return (column + 1) to row
-        }
-        if (row < screenHeight - 1) {
-            return 0 to (row + 1)
-        }
-        if (!scrolledDuringOverflow) {
-            appendBottomLineForScroll()
-        }
-        return 0 to (screenHeight - 1)
+    private fun cursorFromAbsoluteColumn(
+        startCursor: CursorPosition,
+        startAbsoluteColumn: Int,
+        endAbsoluteColumn: Int,
+    ): CursorPosition {
+        val startWrappedRow = startAbsoluteColumn / screenWidth
+        val endWrappedRow = endAbsoluteColumn / screenWidth
+        val rowDelta = endWrappedRow - startWrappedRow
+        val targetRow = (startCursor.row + rowDelta).coerceAtMost(screenHeight - 1)
+        val targetColumn = endAbsoluteColumn % screenWidth
+        return CursorPosition(column = targetColumn, row = targetRow)
     }
 }

@@ -441,11 +441,8 @@ class BufferDataManagerTest {
         val frame = manager.composeRenderFrame()
 
         assertEquals(listOf('A', 'B', 'C', 'D').map { it.code }, frame.rows[0].map { it.codePoint })
-        assertEquals(
-            listOf('X'.code, 'Y'.code, null, null),
-            frame.rows[1].map { it.codePoint },
-        )
-        assertEquals(listOf(null, null, null, null), frame.rows[2].map { it.codePoint })
+        assertEquals(listOf('E'.code, null, null, null), frame.rows[1].map { it.codePoint })
+        assertEquals(listOf('X'.code, 'Y'.code, null, null), frame.rows[2].map { it.codePoint })
     }
 
     @Test
@@ -532,7 +529,7 @@ class BufferDataManagerTest {
     }
 
     @Test
-    fun `write text bottom overflow scrolls and enforces scrollback cap`() {
+    fun `write text bottom overflow stays in the same logical line and keeps storage size`() {
         val storage = InMemoryLineStorage()
         val manager =
             BufferDataManager(
@@ -546,10 +543,10 @@ class BufferDataManagerTest {
         manager.writeText("XYZW")
 
         val frame = manager.composeRenderFrame()
-        assertEquals(3, storage.lineCount)
-        assertEquals(listOf('Y'.code, 'Z'.code), frame.rows[0].map { it.codePoint })
-        assertEquals(listOf('W'.code, null), frame.rows[1].map { it.codePoint })
-        assertEquals(listOf(null, 'X'.code), storage.lineSnapshot(0).map { it.codePoint })
+        assertEquals(2, storage.lineCount)
+        assertEquals(listOf(null, null), frame.rows[0].map { it.codePoint })
+        assertEquals(listOf(null, 'X'.code), frame.rows[1].map { it.codePoint })
+        assertEquals(listOf(null, 'X'.code, 'Y'.code, 'Z'.code, 'W'.code), storage.lineSnapshot(1).map { it.codePoint })
     }
 
     @Test
@@ -573,7 +570,7 @@ class BufferDataManagerTest {
     }
 
     @Test
-    fun `insert text propagates overflow across rows`() {
+    fun `insert text keeps overflow inside the same logical line`() {
         val storage = InMemoryLineStorage()
         val manager =
             BufferDataManager(
@@ -589,14 +586,15 @@ class BufferDataManagerTest {
         manager.insertText("X")
 
         val frame = manager.composeRenderFrame()
-        assertEquals(listOf('c'.code, 'd'.code, 'e'.code), frame.rows[0].map { it.codePoint })
-        assertEquals(listOf('f'.code, null, null), frame.rows[1].map { it.codePoint })
-        assertEquals(listOf('a'.code, 'X'.code, 'b'.code), storage.lineSnapshot(0).map { it.codePoint })
+        assertEquals(listOf('a'.code, 'X'.code, 'b'.code), frame.rows[0].map { it.codePoint })
+        assertEquals(listOf('c'.code, null, null), frame.rows[1].map { it.codePoint })
+        assertEquals(listOf('a'.code, 'X'.code, 'b'.code, 'c'.code), storage.lineSnapshot(0).map { it.codePoint })
+        assertEquals(listOf('d'.code, 'e'.code, 'f'.code), storage.lineSnapshot(1).map { it.codePoint })
         assertEquals(CursorPosition(column = 2, row = 0), manager.cursorPosition)
     }
 
     @Test
-    fun `insert text bottom overflow scrolls and trims by cap`() {
+    fun `insert text bottom overflow stays in the same logical line`() {
         val storage = InMemoryLineStorage()
         val manager =
             BufferDataManager(
@@ -612,9 +610,10 @@ class BufferDataManagerTest {
         manager.insertText("X")
 
         val frame = manager.composeRenderFrame()
-        assertEquals(3, storage.lineCount)
-        assertEquals(listOf('c'.code, 'X'.code), frame.rows[0].map { it.codePoint })
-        assertEquals(listOf('d'.code, null), frame.rows[1].map { it.codePoint })
+        assertEquals(2, storage.lineCount)
+        assertEquals(listOf('a'.code, 'b'.code), frame.rows[0].map { it.codePoint })
+        assertEquals(listOf('c'.code, 'X'.code), frame.rows[1].map { it.codePoint })
+        assertEquals(listOf('c'.code, 'X'.code, 'd'.code), storage.lineSnapshot(1).map { it.codePoint })
         assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
     }
 
@@ -639,6 +638,91 @@ class BufferDataManagerTest {
             frame.rows[0].map { it.codePoint },
         )
         assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
+    }
+
+    @Test
+    fun `write and insert long wrap sequences keep final cursor deterministic`() {
+        val writeManager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 3,
+            )
+        writeManager.setCursorPosition(column = 0, row = 0)
+
+        writeManager.writeText("ABCDEFG")
+
+        assertEquals(CursorPosition(column = 1, row = 1), writeManager.cursorPosition)
+
+        val insertStorage = InMemoryLineStorage()
+        val insertManager =
+            BufferDataManager(
+                storage = insertStorage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 6,
+            )
+        insertStorage.replaceLine(0, lineOf("abc"))
+        insertStorage.replaceLine(1, lineOf("def"))
+        insertManager.setCursorPosition(column = 0, row = 0)
+
+        insertManager.insertText("WXYZ")
+
+        assertEquals(CursorPosition(column = 1, row = 1), insertManager.cursorPosition)
+    }
+
+    @Test
+    fun `editing while viewport is scrolled up auto-pins and edits bottom visible region`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 3,
+                screenHeight = 2,
+                scrollbackMaxLines = 10,
+            )
+        storage.appendLine(lineOf("111"))
+        storage.appendLine(lineOf("222"))
+        storage.appendLine(lineOf("333"))
+        manager.setViewportTopLineIndex(0)
+        assertTrue(!manager.viewportPinnedToBottom)
+
+        manager.setCursorPosition(column = 0, row = 0)
+        manager.writeText("A")
+
+        assertTrue(manager.viewportPinnedToBottom)
+        assertEquals(manager.maxViewportTopLineIndex, manager.viewportTopLineIndex)
+        val frame = manager.composeRenderFrame()
+        assertEquals(listOf('A'.code, '2'.code, '2'.code), frame.rows[0].map { it.codePoint })
+    }
+
+    @Test
+    fun `empty write and insert are no-op for cursor and content`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 2,
+            )
+        storage.replaceLine(0, lineOf("abcd"))
+        storage.replaceLine(1, lineOf("xy"))
+        manager.setCursorPosition(column = 2, row = 1)
+
+        val beforeCursor = manager.cursorPosition
+        val beforeFrame = manager.composeRenderFrame()
+
+        manager.writeText("")
+        manager.insertText("")
+
+        val afterFrame = manager.composeRenderFrame()
+        assertEquals(beforeCursor, manager.cursorPosition)
+        assertEquals(
+            beforeFrame.rows.map { row -> row.map { it.codePoint } },
+            afterFrame.rows.map { row -> row.map { it.codePoint } },
+        )
     }
 
     @Test
