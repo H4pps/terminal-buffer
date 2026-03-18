@@ -118,10 +118,100 @@ class BufferDataManager(
         return if (mappedIndex in 0 until storage.lineCount) mappedIndex else null
     }
 
+    /**
+     * Sets cursor to the exact [column]/[row] position.
+     *
+     * @param column zero-based screen column
+     * @param row zero-based screen row
+     * @throws IndexOutOfBoundsException when target is outside screen bounds
+     */
+    fun setCursorPosition(
+        column: Int,
+        row: Int,
+    ) {
+        validateCursorTarget(column, row)
+        cursorPosition = CursorPosition(column = column, row = row)
+        updateViewportForCursorRow()
+    }
+
+    /**
+     * Moves cursor up by [cells] within screen bounds.
+     *
+     * @param cells number of cells to move
+     * @throws IllegalArgumentException when [cells] is negative
+     */
+    fun moveCursorUp(cells: Int = 1) {
+        validateMovementCells(cells)
+        cursorPosition = cursorPosition.moveUp(cells).clampTo(screenWidth, screenHeight)
+        updateViewportForCursorRow()
+    }
+
+    /**
+     * Moves cursor down by [cells] within screen bounds.
+     *
+     * @param cells number of cells to move
+     * @throws IllegalArgumentException when [cells] is negative
+     */
+    fun moveCursorDown(cells: Int = 1) {
+        validateMovementCells(cells)
+        cursorPosition = cursorPosition.moveDown(cells).clampTo(screenWidth, screenHeight)
+        updateViewportForCursorRow()
+    }
+
+    /**
+     * Moves cursor left by [cells] within screen bounds.
+     *
+     * @param cells number of cells to move
+     * @throws IllegalArgumentException when [cells] is negative
+     */
+    fun moveCursorLeft(cells: Int = 1) {
+        validateMovementCells(cells)
+        cursorPosition = cursorPosition.moveLeft(cells).clampTo(screenWidth, screenHeight)
+        updateViewportForCursorRow()
+    }
+
+    /**
+     * Moves cursor right by [cells] within screen bounds.
+     *
+     * @param cells number of cells to move
+     * @throws IllegalArgumentException when [cells] is negative
+     */
+    fun moveCursorRight(cells: Int = 1) {
+        validateMovementCells(cells)
+        cursorPosition = cursorPosition.moveRight(cells).clampTo(screenWidth, screenHeight)
+        updateViewportForCursorRow()
+    }
+
     private fun bootstrapEmptyScreen() {
         storage.clear()
         repeat(screenHeight) {
             storage.appendLine(BufferLine.empty())
+        }
+    }
+
+    private fun validateCursorTarget(
+        column: Int,
+        row: Int,
+    ) {
+        if (column !in 0 until screenWidth) {
+            throw IndexOutOfBoundsException(
+                "Cursor column $column is outside valid range 0..${screenWidth - 1}",
+            )
+        }
+        if (row !in 0 until screenHeight) {
+            throw IndexOutOfBoundsException(
+                "Cursor row $row is outside valid range 0..${screenHeight - 1}",
+            )
+        }
+    }
+
+    private fun validateMovementCells(cells: Int) {
+        require(cells >= 0) { "Movement cells must be non-negative: $cells" }
+    }
+
+    private fun updateViewportForCursorRow() {
+        if (cursorPosition.row == screenHeight - 1) {
+            pinViewportToBottom()
         }
     }
 }

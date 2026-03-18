@@ -8,6 +8,7 @@ import terminalbuffer.storage.InMemoryLineStorage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -239,6 +240,166 @@ class BufferDataManagerTest {
         assertEquals(0, manager.storageIndexForScreenRow(0))
         assertNull(manager.storageIndexForScreenRow(1))
         assertNull(manager.storageIndexForScreenRow(2))
+    }
+
+    @Test
+    fun `set cursor position updates cursor for valid coordinates`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        manager.setCursorPosition(column = 4, row = 2)
+
+        assertEquals(CursorPosition(column = 4, row = 2), manager.cursorPosition)
+    }
+
+    @Test
+    fun `set cursor position throws for out-of-bounds coordinates`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = -1, row = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 5, row = 0) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 0, row = -1) }
+        assertFailsWith<IndexOutOfBoundsException> { manager.setCursorPosition(column = 0, row = 3) }
+    }
+
+    @Test
+    fun `cursor move methods use default step one`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        manager.setCursorPosition(column = 1, row = 1)
+
+        manager.moveCursorRight()
+        assertEquals(CursorPosition(column = 2, row = 1), manager.cursorPosition)
+
+        manager.moveCursorDown()
+        assertEquals(CursorPosition(column = 2, row = 2), manager.cursorPosition)
+
+        manager.moveCursorLeft()
+        assertEquals(CursorPosition(column = 1, row = 2), manager.cursorPosition)
+
+        manager.moveCursorUp()
+        assertEquals(CursorPosition(column = 1, row = 1), manager.cursorPosition)
+    }
+
+    @Test
+    fun `cursor move methods clamp within screen bounds`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        manager.setCursorPosition(column = 2, row = 1)
+
+        manager.moveCursorLeft(20)
+        assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
+
+        manager.moveCursorUp(20)
+        assertEquals(CursorPosition(column = 0, row = 0), manager.cursorPosition)
+
+        manager.moveCursorRight(20)
+        assertEquals(CursorPosition(column = 4, row = 0), manager.cursorPosition)
+
+        manager.moveCursorDown(20)
+        assertEquals(CursorPosition(column = 4, row = 2), manager.cursorPosition)
+    }
+
+    @Test
+    fun `cursor move methods reject negative cells`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+
+        assertFailsWith<IllegalArgumentException> { manager.moveCursorUp(-1) }
+        assertFailsWith<IllegalArgumentException> { manager.moveCursorDown(-1) }
+        assertFailsWith<IllegalArgumentException> { manager.moveCursorLeft(-1) }
+        assertFailsWith<IllegalArgumentException> { manager.moveCursorRight(-1) }
+    }
+
+    @Test
+    fun `cursor stays within bounds across mixed set and move sequence`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 4,
+                screenHeight = 2,
+                scrollbackMaxLines = 100,
+            )
+
+        manager.setCursorPosition(column = 3, row = 1)
+        manager.moveCursorRight(10)
+        manager.moveCursorDown(10)
+        manager.moveCursorLeft(10)
+        manager.moveCursorUp(10)
+
+        val cursor = manager.cursorPosition
+        assertTrue(cursor.column in 0 until manager.screenWidth)
+        assertTrue(cursor.row in 0 until manager.screenHeight)
+    }
+
+    @Test
+    fun `landing cursor on bottom row hard-pins viewport`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+        manager.setViewportTopLineIndex(1)
+        assertNotEquals(manager.maxViewportTopLineIndex, manager.viewportTopLineIndex)
+        assertTrue(!manager.viewportPinnedToBottom)
+
+        manager.setCursorPosition(column = 0, row = 2)
+
+        assertEquals(manager.maxViewportTopLineIndex, manager.viewportTopLineIndex)
+        assertTrue(manager.viewportPinnedToBottom)
+    }
+
+    @Test
+    fun `non-bottom cursor updates do not auto-unpin or change viewport top`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 5,
+                screenHeight = 3,
+                scrollbackMaxLines = 100,
+            )
+        storage.appendLine(lineOf("a"))
+        storage.appendLine(lineOf("b"))
+        manager.pinViewportToBottom()
+        val pinnedTop = manager.viewportTopLineIndex
+
+        manager.setCursorPosition(column = 1, row = 1)
+        manager.moveCursorRight(1)
+
+        assertEquals(pinnedTop, manager.viewportTopLineIndex)
+        assertTrue(manager.viewportPinnedToBottom)
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })
