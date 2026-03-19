@@ -227,11 +227,52 @@ Run application:
 - Enter startup width/height and scrollback max lines in the prompt.
 - Type `help` in the command loop for available operations.
 
-## Implementation notes
+## Usage Instructions
+
+Command UI format:
+- One command per line after the `cmd>` prompt.
+- Commands are case-insensitive for keywords.
+- Screen output is redrawn after mutating commands.
+
+Supported commands:
+- `attr get`
+- `attr set <fg> <bg> <bold> <italic> <underline>`
+- `cursor get`
+- `cursor set <column> <row>`
+- `up [n]`, `down [n]`, `left [n]`, `right [n]`
+- `write <text>` or `w <text>`
+- `insert <text>` or `i <text>`
+- `fill <character|empty>`
+- `enter`
+- `bottom` or `insert-empty-line`
+- `clear`
+- `clearall`
+- `char <screen|scrollback> <row> <column>`
+- `cellattr <screen|scrollback> <row> <column>`
+- `line <screen|scrollback> <row>`
+- `screen`
+- `all`
+- `resize <width> <height>`
+- `help` or `h`
+- `quit`, `q`, or `exit`
+
+Quick example session:
+
+```text
+cmd> write hello
+cmd> right 2
+cmd> insert X
+cmd> attr set bright_green default true false false
+cmd> fill Z
+cmd> screen
+cmd> all
+cmd> quit
+```
+
+## Implementation Notes
 
 - No custom characters/glyph sets are supported.
 - Text cells store standard Unicode code points only.
-- Other functionality is implemented
 
 ## Authorship Note
 
