@@ -192,7 +192,7 @@ class TerminalEditorTest {
         assertEquals(3, editor.screenHeight)
         assertEquals(5, editor.scrollbackMaxLines)
         assertEquals(customAttributes, editor.currentAttributes)
-        assertEquals(CursorPosition(column = 1, row = 1), editor.cursorPosition)
+        assertEquals(CursorPosition(column = 1, row = 2), editor.cursorPosition)
         assertEquals('A'.code, editor.characterAt(BufferRegion.SCREEN, row = 0, column = 0))
         assertEquals('B'.code, editor.characterAt(BufferRegion.SCREEN, row = 0, column = 1))
         assertEquals(' '.code, editor.characterAt(BufferRegion.SCREEN, row = 1, column = 0))

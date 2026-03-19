@@ -1116,7 +1116,7 @@ class BufferDataManagerTest {
     }
 
     @Test
-    fun `resize preserves logical lines attributes and clamps cursor`() {
+    fun `resize preserves logical lines attributes and remaps cursor relatively`() {
         val storage = InMemoryLineStorage()
         val manager =
             BufferDataManager(
@@ -1154,8 +1154,42 @@ class BufferDataManagerTest {
             CellAttributes(foreground = TerminalColor.BRIGHT_RED, underline = true),
             manager.currentAttributes,
         )
-        assertEquals(CursorPosition(column = 0, row = 1), manager.cursorPosition)
+        assertEquals(CursorPosition(column = 0, row = 2), manager.cursorPosition)
         assertTrue(manager.viewportPinnedToBottom)
+    }
+
+    @Test
+    fun `resize clamps old cursor when source row has no logical backing line`() {
+        val manager =
+            BufferDataManager(
+                storage = InMemoryLineStorage(),
+                screenWidth = 8,
+                screenHeight = 6,
+                scrollbackMaxLines = 10,
+            )
+
+        manager.setCursorPosition(column = 4, row = 3)
+        manager.resize(screenWidth = 4, screenHeight = 3)
+
+        assertEquals(CursorPosition(column = 3, row = 2), manager.cursorPosition)
+    }
+
+    @Test
+    fun `resize keeps wrapped logical cursor position when destination slice is visible`() {
+        val storage = InMemoryLineStorage()
+        val manager =
+            BufferDataManager(
+                storage = storage,
+                screenWidth = 20,
+                screenHeight = 20,
+                scrollbackMaxLines = 50,
+            )
+        storage.replaceLine(0, lineOf("sadlkfjals;kdjfalsdklaskdfjaksdfa"))
+        manager.setCursorPosition(column = 12, row = 1)
+
+        manager.resize(screenWidth = 7, screenHeight = 7)
+
+        assertEquals(CursorPosition(column = 4, row = 4), manager.cursorPosition)
     }
 
     private fun lineOf(text: String): BufferLine = BufferLine.fromCells(text.map { TerminalCell.fromChar(it) })

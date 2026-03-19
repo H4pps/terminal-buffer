@@ -474,8 +474,14 @@ class BufferDataManager(
     /**
      * Resizes screen dimensions in place while preserving canonical storage content.
      *
-     * Cursor is clamped to new bounds. Viewport pin state is preserved: pinned viewports stay
-     * pinned to bottom, and non-pinned viewports keep their top line index when still valid.
+     * Cursor is remapped by logical wrapped position:
+     * the old cursor's `(lineIndex, absoluteColumn)` is projected into the new wrapped viewport.
+     * When exact wrapped segment is not visible, cursor is placed on the nearest visible segment
+     * of the same logical line. If logical mapping is unavailable, cursor falls back to clamped
+     * old screen coordinates.
+     *
+     * Viewport pin state is preserved: pinned viewports stay pinned to bottom, and non-pinned
+     * viewports keep their top line index when still valid.
      *
      * @param screenWidth new screen width in cells
      * @param screenHeight new screen height in rows
@@ -491,6 +497,15 @@ class BufferDataManager(
         val previousCursor = cursorPosition
         val previousTopLineIndex = viewportTopLineIndex
         val wasPinnedToBottom = viewportPinnedToBottom
+        val previousScreenWidth = this.screenWidth
+        val previousScreenHeight = this.screenHeight
+        val previousLogicalCursorLocation =
+            resolveLogicalCursorLocation(
+                cursor = previousCursor,
+                screenWidth = previousScreenWidth,
+                screenHeight = previousScreenHeight,
+                topLineIndex = previousTopLineIndex,
+            )
 
         this.screenWidth = screenWidth
         this.screenHeight = screenHeight
@@ -505,11 +520,23 @@ class BufferDataManager(
             viewportController.setTopLineIndex(previousTopLineIndex.coerceIn(0, viewportController.maxTopIndex))
         }
 
+        val resizedCursor =
+            previousLogicalCursorLocation
+                ?.let { logical ->
+                    mapLogicalCursorToVisibleScreen(
+                        logical = logical,
+                        screenWidth = this.screenWidth,
+                        screenHeight = this.screenHeight,
+                        topLineIndex = viewportController.topLineIndex,
+                    )
+                }
+                ?: previousCursor.clampTo(this.screenWidth, this.screenHeight)
+
         cursorController =
             CursorController(
                 screenWidth = this.screenWidth,
                 screenHeight = this.screenHeight,
-                initial = previousCursor.clampTo(this.screenWidth, this.screenHeight),
+                initial = resizedCursor.clampTo(this.screenWidth, this.screenHeight),
                 onBottomRowReached = { pinViewportToBottom() },
             )
 
@@ -724,4 +751,102 @@ class BufferDataManager(
         viewportTopLineIndex = viewportController.topLineIndex
         viewportPinnedToBottom = viewportController.pinnedToBottom
     }
+
+    /**
+     * Resolves current cursor as logical wrapped location in the supplied viewport geometry.
+     *
+     * @param cursor cursor position in supplied screen geometry
+     * @param screenWidth source screen width
+     * @param screenHeight source screen height
+     * @param topLineIndex source viewport top line index
+     * @return logical location when cursor row has backing line, otherwise null
+     */
+    private fun resolveLogicalCursorLocation(
+        cursor: CursorPosition,
+        screenWidth: Int,
+        screenHeight: Int,
+        topLineIndex: Int,
+    ): LogicalCursorLocation? {
+        val references =
+            WrappedViewportMapper.rowReferences(
+                storage = storage,
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                topLineIndex = topLineIndex,
+            )
+        val rowReference = references[cursor.row]
+        val lineIndex = rowReference.lineIndex ?: return null
+        return LogicalCursorLocation(
+            lineIndex = lineIndex,
+            absoluteColumn = rowReference.startColumnIndex + cursor.column,
+        )
+    }
+
+    /**
+     * Maps logical wrapped cursor location to current visible screen coordinates.
+     *
+     * @param logical logical cursor location
+     * @param screenWidth target screen width
+     * @param screenHeight target screen height
+     * @param topLineIndex target viewport top line index
+     * @return mapped screen cursor position
+     */
+    private fun mapLogicalCursorToVisibleScreen(
+        logical: LogicalCursorLocation,
+        screenWidth: Int,
+        screenHeight: Int,
+        topLineIndex: Int,
+    ): CursorPosition {
+        val references =
+            WrappedViewportMapper.rowReferences(
+                storage = storage,
+                screenWidth = screenWidth,
+                screenHeight = screenHeight,
+                topLineIndex = topLineIndex,
+            )
+
+        val exactRowIndex =
+            references.indexOfFirst { reference ->
+                reference.lineIndex == logical.lineIndex &&
+                    logical.absoluteColumn in reference.startColumnIndex until (reference.startColumnIndex + screenWidth)
+            }
+        if (exactRowIndex >= 0) {
+            val reference = references[exactRowIndex]
+            return CursorPosition(
+                column = logical.absoluteColumn - reference.startColumnIndex,
+                row = exactRowIndex,
+            )
+        }
+
+        val candidateRows =
+            references
+                .withIndex()
+                .filter { (_, reference) -> reference.lineIndex == logical.lineIndex }
+        if (candidateRows.isEmpty()) {
+            return CursorPosition(column = 0, row = 0)
+        }
+
+        val nearest =
+            candidateRows
+                .filter { (_, reference) -> reference.startColumnIndex <= logical.absoluteColumn }
+                .maxByOrNull { (_, reference) -> reference.startColumnIndex }
+                ?: candidateRows.first()
+        val nearestRow = nearest.index
+        val nearestStart = nearest.value.startColumnIndex
+        return CursorPosition(
+            column = (logical.absoluteColumn - nearestStart).coerceIn(0, screenWidth - 1),
+            row = nearestRow,
+        )
+    }
+
+    /**
+     * Logical cursor location represented in canonical line coordinates.
+     *
+     * @property lineIndex backing logical line index
+     * @property absoluteColumn zero-based absolute column index inside logical line
+     */
+    private data class LogicalCursorLocation(
+        val lineIndex: Int,
+        val absoluteColumn: Int,
+    )
 }
