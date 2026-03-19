@@ -18,13 +18,15 @@ fun main() {
     val input = BufferedReader(InputStreamReader(System.`in`))
     val output = System.out
     val detectedSize = detectTerminalSize()
-    val size = TerminalSizePrompter(input = input, output = output).prompt(initial = detectedSize)
+    val sizePrompter = TerminalSizePrompter(input = input, output = output)
+    val size = sizePrompter.prompt(initial = detectedSize)
+    val scrollbackMaxLines = sizePrompter.promptScrollbackMaxLines(defaultValue = 1000)
     val renderer = AnsiTerminalRenderer()
     val buffer =
         TerminalEditor.create(
             screenWidth = size.width,
             screenHeight = size.height,
-            scrollbackMaxLines = 1000,
+            scrollbackMaxLines = scrollbackMaxLines,
             renderer = renderer,
         )
 

@@ -81,6 +81,29 @@ class CommandTerminalUiAppTest {
     }
 
     @Test
+    fun `enter command does not crash when destination row has no selectable cell`() {
+        val output = ByteArrayOutputStream()
+        val buffer =
+            FakeBuffer(
+                screenWidth = 5,
+                screenHeight = 3,
+                occupiedScreenCells = setOf(0 to 0),
+            )
+        val app =
+            CommandTerminalUiApp(
+                initialBuffer = buffer,
+                renderer = PlainTextRenderer(),
+                input = BufferedReader(StringReader("enter\nquit\n")),
+                output = PrintStream(output),
+            )
+
+        app.run()
+
+        assertEquals(CursorPosition(column = 0, row = 0), buffer.cursorPosition)
+        assertTrue(output.toString().contains("empty"))
+    }
+
+    @Test
     fun `cursor set is blocked for empty target cell`() {
         val output = ByteArrayOutputStream()
         val buffer =

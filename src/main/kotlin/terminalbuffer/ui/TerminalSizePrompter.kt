@@ -75,6 +75,32 @@ class TerminalSizePrompter(
     }
 
     /**
+     * Prompts for startup scrollback maximum line count.
+     *
+     * @param defaultValue default scrollback maximum used for empty input/EOF
+     * @param min minimum accepted value
+     * @param max maximum accepted value
+     * @return validated scrollback maximum line count
+     * @throws IllegalArgumentException when bounds are invalid
+     */
+    fun promptScrollbackMaxLines(
+        defaultValue: Int = 1000,
+        min: Int = 0,
+        max: Int = 100000,
+    ): Int {
+        require(min >= 0) { "Minimum scrollback must be non-negative: $min" }
+        require(max >= min) { "Maximum scrollback must be >= minimum: $max < $min" }
+
+        val normalizedDefault = defaultValue.coerceIn(min, max)
+        return promptIntegerValue(
+            name = "Scrollback",
+            defaultValue = normalizedDefault,
+            min = min,
+            max = max,
+        )
+    }
+
+    /**
      * Prompts for one numeric dimension and validates against [min]/[max].
      *
      * @param name display name used in prompt text
@@ -84,6 +110,28 @@ class TerminalSizePrompter(
      * @return accepted value in `[min, max]`
      */
     private fun promptDimension(
+        name: String,
+        defaultValue: Int,
+        min: Int,
+        max: Int,
+    ): Int =
+        promptIntegerValue(
+            name = name,
+            defaultValue = defaultValue,
+            min = min,
+            max = max,
+        )
+
+    /**
+     * Prompts for one integer value and validates against [min]/[max].
+     *
+     * @param name display name used in prompt text
+     * @param defaultValue fallback value for empty input/EOF
+     * @param min minimum accepted value
+     * @param max maximum accepted value
+     * @return accepted value in `[min, max]`
+     */
+    private fun promptIntegerValue(
         name: String,
         defaultValue: Int,
         min: Int,

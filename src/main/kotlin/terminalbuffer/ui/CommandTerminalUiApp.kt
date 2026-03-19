@@ -218,13 +218,30 @@ class CommandTerminalUiApp(
      * @return outcome instructing caller to redraw
      */
     private fun handleEnter(): CommandOutcome {
-        if (buffer.cursorRow < buffer.screenHeight - 1) {
-            buffer.setCursorPosition(column = 0, row = buffer.cursorRow + 1)
-        } else {
-            buffer.insertEmptyLineAtBottom()
-            buffer.setCursorPosition(column = 0, row = buffer.screenHeight - 1)
+        val targetRow =
+            if (buffer.cursorRow < buffer.screenHeight - 1) {
+                buffer.cursorRow + 1
+            } else {
+                buffer.screenHeight - 1
+            }
+
+        return try {
+            if (buffer.cursorRow < buffer.screenHeight - 1) {
+                try {
+                    buffer.setCursorPosition(column = 0, row = targetRow)
+                } catch (_: IndexOutOfBoundsException) {
+                    buffer.insertEmptyLineAtBottom()
+                    buffer.setCursorPosition(column = 0, row = targetRow)
+                }
+            } else {
+                buffer.insertEmptyLineAtBottom()
+                buffer.setCursorPosition(column = 0, row = targetRow)
+            }
+            CommandOutcome.RENDER
+        } catch (error: IndexOutOfBoundsException) {
+            output.println(error.message ?: "Enter cannot move cursor to target row.")
+            CommandOutcome.IGNORE
         }
-        return CommandOutcome.RENDER
     }
 
     /**

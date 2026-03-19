@@ -6,6 +6,7 @@ import java.io.PrintStream
 import java.io.StringReader
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class TerminalSizePrompterTest {
@@ -81,5 +82,61 @@ class TerminalSizePrompterTest {
         val size = prompter.prompt(initial = TerminalSize(width = 500, height = 1))
 
         assertEquals(TerminalSize(width = 30, height = 10), size)
+    }
+
+    @Test
+    fun `prompt scrollback accepts valid value`() {
+        val output = ByteArrayOutputStream()
+        val prompter =
+            TerminalSizePrompter(
+                input = BufferedReader(StringReader("3\n")),
+                output = PrintStream(output),
+            )
+
+        val scrollback = prompter.promptScrollbackMaxLines(defaultValue = 1000)
+
+        assertEquals(3, scrollback)
+    }
+
+    @Test
+    fun `prompt scrollback uses default for empty input and clamps default to valid range`() {
+        val output = ByteArrayOutputStream()
+        val prompter =
+            TerminalSizePrompter(
+                input = BufferedReader(StringReader("\n")),
+                output = PrintStream(output),
+            )
+
+        val scrollback = prompter.promptScrollbackMaxLines(defaultValue = 999999, min = 0, max = 10000)
+
+        assertEquals(10000, scrollback)
+    }
+
+    @Test
+    fun `prompt scrollback re-prompts invalid values until valid`() {
+        val output = ByteArrayOutputStream()
+        val prompter =
+            TerminalSizePrompter(
+                input = BufferedReader(StringReader("-1\n200000\n2048\n")),
+                output = PrintStream(output),
+            )
+
+        val scrollback = prompter.promptScrollbackMaxLines(defaultValue = 1000, min = 0, max = 100000)
+
+        assertEquals(2048, scrollback)
+        val text = output.toString()
+        assertTrue(text.contains("Scrollback must be between 0 and 100000."))
+    }
+
+    @Test
+    fun `prompt scrollback rejects invalid bounds`() {
+        val prompter = TerminalSizePrompter(input = BufferedReader(StringReader("")), output = PrintStream(ByteArrayOutputStream()))
+
+        assertFailsWith<IllegalArgumentException> {
+            prompter.promptScrollbackMaxLines(defaultValue = 1, min = -1, max = 10)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            prompter.promptScrollbackMaxLines(defaultValue = 1, min = 10, max = 9)
+        }
     }
 }
